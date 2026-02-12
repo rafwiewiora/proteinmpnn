@@ -1,0 +1,815 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ProteinMPNN Divergence: 1TNF vs 6OOY (TNF-alpha)</title>
+<link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/molstar@4.5.0/build/viewer/molstar.css">
+<script type="text/javascript" src="https://cdn.jsdelivr.net/npm/molstar@4.5.0/build/viewer/molstar.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; color: #333; }
+
+header {
+    background: linear-gradient(135deg, #1a1a2e, #16213e);
+    color: white; padding: 24px 32px;
+}
+header h1 { font-size: 22px; font-weight: 600; margin-bottom: 6px; }
+header p { font-size: 14px; opacity: 0.8; }
+
+.stats-bar {
+    display: flex; gap: 32px; padding: 12px 32px;
+    background: #e8eaf6; font-size: 13px; flex-wrap: wrap;
+}
+.stats-bar .stat { display: flex; gap: 6px; align-items: center; }
+.stats-bar .stat-label { color: #666; }
+.stats-bar .stat-value { font-weight: 600; color: #1a1a2e; }
+
+.viewers-section {
+    display: flex; gap: 16px; padding: 16px 32px;
+    max-width: 1800px; margin: 0 auto;
+}
+.viewer-container {
+    flex: 1; min-width: 0;
+    background: white; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+    overflow: hidden;
+}
+.viewer-header {
+    padding: 10px 16px; background: #f8f9fa;
+    font-weight: 600; font-size: 14px;
+    border-bottom: 1px solid #eee;
+    display: flex; justify-content: space-between; align-items: center;
+}
+.viewer-header .pdb-id { color: #1565c0; }
+
+/* Mol* viewer container - needs position:relative and fixed height */
+.viewer-box {
+    width: 100%; height: 520px; position: relative;
+}
+
+.legend-bar {
+    display: flex; align-items: center; justify-content: center;
+    gap: 12px; padding: 12px 32px; font-size: 12px; color: #666;
+}
+.legend-gradient {
+    width: 200px; height: 14px; border-radius: 3px;
+    border: 1px solid #ccc;
+}
+.legend-gradient-uncertainty {
+    /* Mol* uncertainty theme: blue → cyan → green → yellow → orange */
+    background: linear-gradient(to right, #3d3dff, #30d5c8, #7cfc00, #ffd700, #ff8c00);
+}
+
+.section { padding: 16px 32px; max-width: 1800px; margin: 0 auto; }
+.section h2 {
+    font-size: 16px; font-weight: 600; margin-bottom: 12px;
+    padding-bottom: 6px; border-bottom: 2px solid #1a1a2e;
+    display: inline-block;
+}
+
+.alignment-wrap {
+    background: white; border-radius: 8px; padding: 16px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+    overflow-x: auto; font-family: 'Courier New', monospace; font-size: 12px;
+}
+.aln-block { margin-bottom: 12px; white-space: nowrap; }
+.aln-label { display: inline-block; width: 60px; text-align: right; margin-right: 8px; color: #888; font-size: 11px; }
+.aln-pos-row { margin-bottom: 2px; }
+.aln-cell {
+    display: inline-block; width: 16px; height: 18px;
+    text-align: center; line-height: 18px; font-size: 11px;
+    border-radius: 2px; cursor: pointer; font-weight: 500;
+}
+.aln-cell:hover { outline: 2px solid #333; z-index: 1; position: relative; }
+.aln-cell.gap { color: #bbb; background: #f5f5f5 !important; }
+
+.table-container {
+    background: white; border-radius: 8px; padding: 16px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.1); overflow-x: auto;
+}
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+thead th {
+    text-align: left; padding: 8px 12px; background: #f8f9fa;
+    border-bottom: 2px solid #ddd; font-weight: 600; font-size: 12px;
+    white-space: nowrap; cursor: pointer; user-select: none;
+}
+thead th:hover { background: #e8eaf6; }
+tbody td { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; }
+tbody tr { cursor: pointer; transition: background 0.15s; }
+tbody tr:hover { background: #e3f2fd; }
+tbody tr.selected { background: #bbdefb; }
+.jsd-bar {
+    display: inline-block; height: 12px; border-radius: 2px;
+    min-width: 2px; vertical-align: middle;
+}
+.aa-badge {
+    display: inline-block; padding: 1px 6px; border-radius: 3px;
+    font-family: 'Courier New', monospace; font-weight: 600; font-size: 12px;
+}
+.freq-small { font-size: 11px; color: #888; margin-left: 4px; }
+
+footer {
+    text-align: center; padding: 20px 32px; font-size: 12px; color: #999;
+    border-top: 1px solid #eee; margin-top: 24px;
+}
+
+.tooltip {
+    position: fixed; background: #333; color: white;
+    padding: 8px 12px; border-radius: 6px; font-size: 12px;
+    pointer-events: none; z-index: 1000; max-width: 280px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3); display: none;
+    line-height: 1.5;
+}
+</style>
+</head>
+<body>
+
+<header>
+    <h1>ProteinMPNN Divergence Analysis: 1TNF vs 6OOY</h1>
+    <p>TNF-alpha homotrimers &mdash; 10 ProteinMPNN runs per structure, Jensen-Shannon divergence of designed sequence distributions</p>
+</header>
+
+<div class="stats-bar">
+    <div class="stat"><span class="stat-label">Aligned positions:</span><span class="stat-value">152</span></div>
+    <div class="stat"><span class="stat-label">1TNF residues:</span><span class="stat-value">152</span></div>
+    <div class="stat"><span class="stat-label">6OOY residues:</span><span class="stat-value">134</span></div>
+    <div class="stat"><span class="stat-label">Mean JS-div:</span><span class="stat-value">0.263</span></div>
+    <div class="stat"><span class="stat-label">Max JS-div:</span><span class="stat-value">1.000</span></div>
+    <div class="stat"><span class="stat-label">Positions with JS &gt; 0.5:</span><span class="stat-value">23</span></div>
+</div>
+
+<div class="viewers-section">
+    <div class="viewer-container">
+        <div class="viewer-header">
+            <span><span class="pdb-id">1TNF</span> &mdash; Human TNF-alpha</span>
+            <span style="font-size:12px;color:#888">152 res/chain</span>
+        </div>
+        <div class="viewer-box" id="viewer-1tnf"></div>
+    </div>
+    <div class="viewer-container">
+        <div class="viewer-header">
+            <span><span class="pdb-id">6OOY</span> &mdash; Human TNF-alpha</span>
+            <span style="font-size:12px;color:#888">134 res/chain</span>
+        </div>
+        <div class="viewer-box" id="viewer-6ooy"></div>
+    </div>
+</div>
+
+<div class="legend-bar">
+    <span>Low B-factor (conserved)</span>
+    <div class="legend-gradient legend-gradient-uncertainty"></div>
+    <span>High B-factor (divergent)</span>
+    <span style="margin-left:16px;font-style:italic;color:#999">Mol* "uncertainty" color theme on replaced B-factors</span>
+</div>
+
+<div class="section">
+    <h2>Aligned Consensus Sequences</h2>
+    <div class="alignment-wrap" id="alignment"></div>
+</div>
+
+<div class="section">
+    <h2>Top 20 Divergent Positions</h2>
+    <div class="table-container">
+        <table id="div-table">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Aligned Pos</th>
+                    <th>WT</th>
+                    <th>1TNF Consensus</th>
+                    <th>6OOY Consensus</th>
+                    <th>Top AA (1TNF)</th>
+                    <th>Top AA (6OOY)</th>
+                    <th>JS Divergence</th>
+                </tr>
+            </thead>
+            <tbody id="div-tbody"></tbody>
+        </table>
+    </div>
+</div>
+
+<footer>
+    Generated from ProteinMPNN analysis &mdash; 1TNF (PDB) vs 6OOY (PDB) TNF-alpha homotrimers
+</footer>
+
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+// ===== Embedded data =====
+const POSITIONS = [{"ap": 1, "a1": "G", "a2": "-", "t1": "G", "f1": 0.553, "t2": "-", "f2": 0.0, "jsd": 0.5, "mi1": 0, "mi2": null, "w1": "R", "w2": "-", "r1": 6, "r2": null}, {"ap": 2, "a1": "S", "a2": "-", "t1": "S", "f1": 0.68, "t2": "-", "f2": 0.0, "jsd": 0.5, "mi1": 1, "mi2": null, "w1": "T", "w2": "-", "r1": 7, "r2": null}, {"ap": 3, "a1": "P", "a2": "-", "t1": "P", "f1": 0.833, "t2": "-", "f2": 0.0, "jsd": 0.5, "mi1": 2, "mi2": null, "w1": "P", "w2": "-", "r1": 8, "r2": null}, {"ap": 4, "a1": "S", "a2": "-", "t1": "S", "f1": 0.847, "t2": "-", "f2": 0.0, "jsd": 0.5, "mi1": 3, "mi2": null, "w1": "S", "w2": "-", "r1": 9, "r2": null}, {"ap": 5, "a1": "N", "a2": "-", "t1": "N", "f1": 0.36, "t2": "-", "f2": 0.0, "jsd": 0.5, "mi1": 4, "mi2": null, "w1": "D", "w2": "-", "r1": 10, "r2": null}, {"ap": 6, "a1": "R", "a2": "V", "t1": "R", "f1": 0.627, "t2": "V", "f2": 0.4, "jsd": 0.489, "mi1": 5, "mi2": 0, "w1": "K", "w2": "K", "r1": 11, "r2": 11}, {"ap": 7, "a1": "A", "a2": "A", "t1": "A", "f1": 0.993, "t2": "A", "f2": 0.833, "jsd": 0.0713, "mi1": 6, "mi2": 1, "w1": "P", "w2": "P", "r1": 12, "r2": 12}, {"ap": 8, "a1": "A", "a2": "A", "t1": "A", "f1": 0.76, "t2": "A", "f2": 0.66, "jsd": 0.25, "mi1": 7, "mi2": 2, "w1": "V", "w2": "V", "r1": 13, "r2": 13}, {"ap": 9, "a1": "A", "a2": "A", "t1": "A", "f1": 1.0, "t2": "A", "f2": 1.0, "jsd": 0.0, "mi1": 8, "mi2": 3, "w1": "A", "w2": "A", "r1": 14, "r2": 14}, {"ap": 10, "a1": "N", "a2": "H", "t1": "N", "f1": 0.773, "t2": "H", "f2": 0.94, "jsd": 0.5856, "mi1": 9, "mi2": 4, "w1": "H", "w2": "H", "r1": 15, "r2": 15}, {"ap": 11, "a1": "L", "a2": "L", "t1": "L", "f1": 1.0, "t2": "L", "f2": 0.493, "jsd": 0.3166, "mi1": 10, "mi2": 5, "w1": "V", "w2": "V", "r1": 16, "r2": 16}, {"ap": 12, "a1": "T", "a2": "V", "t1": "T", "f1": 0.513, "t2": "V", "f2": 0.667, "jsd": 0.6023, "mi1": 11, "mi2": 6, "w1": "V", "w2": "V", "r1": 17, "r2": 17}, {"ap": 13, "a1": "A", "a2": "A", "t1": "A", "f1": 0.48, "t2": "A", "f2": 0.513, "jsd": 0.0339, "mi1": 12, "mi2": 7, "w1": "A", "w2": "A", "r1": 18, "r2": 18}, {"ap": 14, "a1": "D", "a2": "D", "t1": "D", "f1": 0.987, "t2": "D", "f2": 0.993, "jsd": 0.0008, "mi1": 13, "mi2": 8, "w1": "N", "w2": "N", "r1": 19, "r2": 19}, {"ap": 15, "a1": "P", "a2": "P", "t1": "P", "f1": 0.993, "t2": "P", "f2": 0.993, "jsd": 0.0, "mi1": 14, "mi2": 9, "w1": "P", "w2": "P", "r1": 20, "r2": 20}, {"ap": 16, "a1": "N", "a2": "N", "t1": "N", "f1": 0.82, "t2": "N", "f2": 0.793, "jsd": 0.0223, "mi1": 15, "mi2": 10, "w1": "Q", "w2": "Q", "r1": 21, "r2": 21}, {"ap": 17, "a1": "A", "a2": "A", "t1": "A", "f1": 0.6, "t2": "A", "f2": 1.0, "jsd": 0.2365, "mi1": 16, "mi2": 11, "w1": "A", "w2": "A", "r1": 22, "r2": 22}, {"ap": 18, "a1": "P", "a2": "V", "t1": "P", "f1": 0.707, "t2": "V", "f2": 0.407, "jsd": 0.7241, "mi1": 17, "mi2": 12, "w1": "E", "w2": "E", "r1": 23, "r2": 23}, {"ap": 19, "a1": "N", "a2": "G", "t1": "N", "f1": 0.7, "t2": "G", "f2": 0.587, "jsd": 0.061, "mi1": 18, "mi2": 13, "w1": "G", "w2": "G", "r1": 24, "r2": 24}, {"ap": 20, "a1": "S", "a2": "A", "t1": "S", "f1": 0.38, "t2": "A", "f2": 0.62, "jsd": 0.1299, "mi1": 19, "mi2": 14, "w1": "Q", "w2": "Q", "r1": 25, "r2": 25}, {"ap": 21, "a1": "L", "a2": "L", "t1": "L", "f1": 0.647, "t2": "L", "f2": 0.627, "jsd": 0.3196, "mi1": 20, "mi2": 15, "w1": "L", "w2": "L", "r1": 26, "r2": 26}, {"ap": 22, "a1": "V", "a2": "V", "t1": "V", "f1": 0.74, "t2": "V", "f2": 0.707, "jsd": 0.0194, "mi1": 21, "mi2": 16, "w1": "Q", "w2": "Q", "r1": 27, "r2": 27}, {"ap": 23, "a1": "W", "a2": "W", "t1": "W", "f1": 0.733, "t2": "W", "f2": 0.987, "jsd": 0.1148, "mi1": 22, "mi2": 17, "w1": "W", "w2": "W", "r1": 28, "r2": 28}, {"ap": 24, "a1": "T", "a2": "V", "t1": "T", "f1": 0.813, "t2": "V", "f2": 0.627, "jsd": 0.6411, "mi1": 23, "mi2": 18, "w1": "L", "w2": "L", "r1": 29, "r2": 29}, {"ap": 25, "a1": "S", "a2": "A", "t1": "S", "f1": 0.653, "t2": "A", "f2": 0.573, "jsd": 0.4142, "mi1": 24, "mi2": 19, "w1": "N", "w2": "N", "r1": 30, "r2": 30}, {"ap": 26, "a1": "G", "a2": "D", "t1": "G", "f1": 1.0, "t2": "D", "f2": 0.8, "jsd": 1.0, "mi1": 25, "mi2": 20, "w1": "R", "w2": "R", "r1": 31, "r2": 31}, {"ap": 27, "a1": "G", "a2": "A", "t1": "G", "f1": 0.36, "t2": "A", "f2": 0.913, "jsd": 0.7112, "mi1": 26, "mi2": 21, "w1": "R", "w2": "R", "r1": 32, "r2": 32}, {"ap": 28, "a1": "P", "a2": "P", "t1": "P", "f1": 0.633, "t2": "P", "f2": 0.987, "jsd": 0.1794, "mi1": 27, "mi2": 22, "w1": "A", "w2": "A", "r1": 33, "r2": 33}, {"ap": 29, "a1": "N", "a2": "N", "t1": "N", "f1": 0.813, "t2": "N", "f2": 0.833, "jsd": 0.0363, "mi1": 28, "mi2": 23, "w1": "N", "w2": "N", "r1": 34, "r2": 34}, {"ap": 30, "a1": "A", "a2": "A", "t1": "A", "f1": 0.647, "t2": "A", "f2": 0.96, "jsd": 0.1631, "mi1": 29, "mi2": 24, "w1": "A", "w2": "A", "r1": 35, "r2": 35}, {"ap": 31, "a1": "I", "a2": "L", "t1": "I", "f1": 0.827, "t2": "L", "f2": 1.0, "jsd": 0.6456, "mi1": 30, "mi2": 25, "w1": "L", "w2": "L", "r1": 36, "r2": 36}, {"ap": 32, "a1": "L", "a2": "L", "t1": "L", "f1": 1.0, "t2": "L", "f2": 1.0, "jsd": 0.0, "mi1": 31, "mi2": 26, "w1": "L", "w2": "L", "r1": 37, "r2": 37}, {"ap": 33, "a1": "S", "a2": "S", "t1": "S", "f1": 0.487, "t2": "S", "f2": 0.587, "jsd": 0.1654, "mi1": 32, "mi2": 27, "w1": "A", "w2": "A", "r1": 38, "r2": 38}, {"ap": 34, "a1": "N", "a2": "N", "t1": "N", "f1": 0.993, "t2": "N", "f2": 0.993, "jsd": 0.0067, "mi1": 33, "mi2": 28, "w1": "N", "w2": "N", "r1": 39, "r2": 39}, {"ap": 35, "a1": "G", "a2": "G", "t1": "G", "f1": 1.0, "t2": "G", "f2": 1.0, "jsd": 0.0, "mi1": 34, "mi2": 29, "w1": "G", "w2": "G", "r1": 40, "r2": 40}, {"ap": 36, "a1": "V", "a2": "V", "t1": "V", "f1": 0.993, "t2": "V", "f2": 1.0, "jsd": 0.0033, "mi1": 35, "mi2": 30, "w1": "V", "w2": "V", "r1": 41, "r2": 41}, {"ap": 37, "a1": "T", "a2": "T", "t1": "T", "f1": 0.64, "t2": "T", "f2": 0.373, "jsd": 0.1354, "mi1": 36, "mi2": 31, "w1": "E", "w2": "E", "r1": 42, "r2": 42}, {"ap": 38, "a1": "L", "a2": "L", "t1": "L", "f1": 1.0, "t2": "L", "f2": 1.0, "jsd": 0.0, "mi1": 37, "mi2": 32, "w1": "L", "w2": "L", "r1": 43, "r2": 43}, {"ap": 39, "a1": "E", "a2": "E", "t1": "E", "f1": 0.473, "t2": "E", "f2": 0.733, "jsd": 0.0959, "mi1": 38, "mi2": 33, "w1": "R", "w2": "R", "r1": 44, "r2": 44}, {"ap": 40, "a1": "N", "a2": "D", "t1": "N", "f1": 0.553, "t2": "D", "f2": 0.593, "jsd": 0.0206, "mi1": 39, "mi2": 34, "w1": "D", "w2": "D", "r1": 45, "r2": 45}, {"ap": 41, "a1": "N", "a2": "N", "t1": "N", "f1": 1.0, "t2": "N", "f2": 1.0, "jsd": 0.0, "mi1": 40, "mi2": 35, "w1": "N", "w2": "N", "r1": 46, "r2": 46}, {"ap": 42, "a1": "K", "a2": "Q", "t1": "K", "f1": 0.467, "t2": "Q", "f2": 0.473, "jsd": 0.1759, "mi1": 41, "mi2": 36, "w1": "Q", "w2": "Q", "r1": 47, "r2": 47}, {"ap": 43, "a1": "I", "a2": "L", "t1": "I", "f1": 0.76, "t2": "L", "f2": 0.84, "jsd": 0.3029, "mi1": 42, "mi2": 37, "w1": "L", "w2": "L", "r1": 48, "r2": 48}, {"ap": 44, "a1": "V", "a2": "V", "t1": "V", "f1": 0.427, "t2": "V", "f2": 1.0, "jsd": 0.3722, "mi1": 43, "mi2": 38, "w1": "V", "w2": "V", "r1": 49, "r2": 49}, {"ap": 45, "a1": "I", "a2": "I", "t1": "I", "f1": 0.913, "t2": "I", "f2": 0.707, "jsd": 0.0596, "mi1": 44, "mi2": 39, "w1": "V", "w2": "V", "r1": 50, "r2": 50}, {"ap": 46, "a1": "P", "a2": "P", "t1": "P", "f1": 1.0, "t2": "P", "f2": 1.0, "jsd": 0.0, "mi1": 45, "mi2": 40, "w1": "P", "w2": "P", "r1": 51, "r2": 51}, {"ap": 47, "a1": "R", "a2": "R", "t1": "R", "f1": 0.48, "t2": "R", "f2": 0.327, "jsd": 0.17, "mi1": 46, "mi2": 41, "w1": "S", "w2": "S", "r1": 52, "r2": 52}, {"ap": 48, "a1": "D", "a2": "S", "t1": "D", "f1": 0.72, "t2": "S", "f2": 0.947, "jsd": 0.8853, "mi1": 47, "mi2": 42, "w1": "E", "w2": "E", "r1": 53, "r2": 53}, {"ap": 49, "a1": "G", "a2": "G", "t1": "G", "f1": 1.0, "t2": "G", "f2": 1.0, "jsd": 0.0, "mi1": 48, "mi2": 43, "w1": "G", "w2": "G", "r1": 54, "r2": 54}, {"ap": 50, "a1": "L", "a2": "L", "t1": "L", "f1": 1.0, "t2": "L", "f2": 0.98, "jsd": 0.0101, "mi1": 49, "mi2": 44, "w1": "L", "w2": "L", "r1": 55, "r2": 55}, {"ap": 51, "a1": "Y", "a2": "Y", "t1": "Y", "f1": 1.0, "t2": "Y", "f2": 1.0, "jsd": 0.0, "mi1": 50, "mi2": 45, "w1": "Y", "w2": "Y", "r1": 56, "r2": 56}, {"ap": 52, "a1": "L", "a2": "L", "t1": "L", "f1": 0.973, "t2": "L", "f2": 0.867, "jsd": 0.0822, "mi1": 51, "mi2": 46, "w1": "L", "w2": "L", "r1": 57, "r2": 57}, {"ap": 53, "a1": "V", "a2": "V", "t1": "V", "f1": 0.713, "t2": "V", "f2": 0.86, "jsd": 0.0235, "mi1": 52, "mi2": 47, "w1": "I", "w2": "I", "r1": 58, "r2": 58}, {"ap": 54, "a1": "Y", "a2": "Y", "t1": "Y", "f1": 0.947, "t2": "Y", "f2": 0.947, "jsd": 0.0212, "mi1": 53, "mi2": 48, "w1": "Y", "w2": "Y", "r1": 59, "r2": 59}, {"ap": 55, "a1": "A", "a2": "G", "t1": "A", "f1": 0.907, "t2": "G", "f2": 0.58, "jsd": 0.2592, "mi1": 54, "mi2": 49, "w1": "S", "w2": "S", "r1": 60, "r2": 60}, {"ap": 56, "a1": "Q", "a2": "Q", "t1": "Q", "f1": 1.0, "t2": "Q", "f2": 1.0, "jsd": 0.0, "mi1": 55, "mi2": 50, "w1": "Q", "w2": "Q", "r1": 61, "r2": 61}, {"ap": 57, "a1": "V", "a2": "V", "t1": "V", "f1": 0.793, "t2": "V", "f2": 0.607, "jsd": 0.0545, "mi1": 56, "mi2": 51, "w1": "V", "w2": "V", "r1": 62, "r2": 62}, {"ap": 58, "a1": "Q", "a2": "L", "t1": "Q", "f1": 0.94, "t2": "L", "f2": 1.0, "jsd": 0.9711, "mi1": 57, "mi2": 52, "w1": "L", "w2": "L", "r1": 63, "r2": 63}, {"ap": 59, "a1": "F", "a2": "F", "t1": "F", "f1": 1.0, "t2": "F", "f2": 1.0, "jsd": 0.0, "mi1": 58, "mi2": 53, "w1": "F", "w2": "F", "r1": 64, "r2": 64}, {"ap": 60, "a1": "K", "a2": "K", "t1": "K", "f1": 0.527, "t2": "K", "f2": 0.68, "jsd": 0.3133, "mi1": 59, "mi2": 54, "w1": "K", "w2": "K", "r1": 65, "r2": 65}, {"ap": 61, "a1": "Q", "a2": "L", "t1": "Q", "f1": 0.707, "t2": "L", "f2": 0.327, "jsd": 0.563, "mi1": 60, "mi2": 55, "w1": "G", "w2": "G", "r1": 66, "r2": 66}, {"ap": 62, "a1": "T", "a2": "T", "t1": "T", "f1": 0.627, "t2": "T", "f2": 0.533, "jsd": 0.3394, "mi1": 61, "mi2": 56, "w1": "Q", "w2": "Q", "r1": 67, "r2": 67}, {"ap": 63, "a1": "G", "a2": "G", "t1": "G", "f1": 1.0, "t2": "G", "f2": 1.0, "jsd": 0.0, "mi1": 62, "mi2": 57, "w1": "G", "w2": "G", "r1": 68, "r2": 68}, {"ap": 64, "a1": "C", "a2": "C", "t1": "C", "f1": 1.0, "t2": "C", "f2": 1.0, "jsd": 0.0, "mi1": 63, "mi2": 58, "w1": "C", "w2": "C", "r1": 69, "r2": 69}, {"ap": 65, "a1": "P", "a2": "-", "t1": "P", "f1": 1.0, "t2": "-", "f2": 0.0, "jsd": 0.5, "mi1": 64, "mi2": null, "w1": "P", "w2": "-", "r1": 70, "r2": null}, {"ap": 66, "a1": "G", "a2": "-", "t1": "G", "f1": 0.273, "t2": "-", "f2": 0.0, "jsd": 0.5, "mi1": 65, "mi2": null, "w1": "S", "w2": "-", "r1": 71, "r2": null}, {"ap": 67, "a1": "G", "a2": "-", "t1": "G", "f1": 0.993, "t2": "-", "f2": 0.0, "jsd": 0.5, "mi1": 66, "mi2": null, "w1": "T", "w2": "-", "r1": 72, "r2": null}, {"ap": 68, "a1": "D", "a2": "S", "t1": "D", "f1": 0.347, "t2": "S", "f2": 0.553, "jsd": 0.3865, "mi1": 67, "mi2": 59, "w1": "H", "w2": "H", "r1": 73, "r2": 73}, {"ap": 69, "a1": "V", "a2": "V", "t1": "V", "f1": 0.773, "t2": "V", "f2": 0.887, "jsd": 0.0514, "mi1": 68, "mi2": 60, "w1": "V", "w2": "V", "r1": 74, "r2": 74}, {"ap": 70, "a1": "T", "a2": "T", "t1": "T", "f1": 0.7, "t2": "T", "f2": 0.853, "jsd": 0.119, "mi1": 69, "mi2": 61, "w1": "L", "w2": "L", "r1": 75, "r2": 75}, {"ap": 71, "a1": "L", "a2": "L", "t1": "L", "f1": 0.987, "t2": "L", "f2": 1.0, "jsd": 0.0067, "mi1": 70, "mi2": 62, "w1": "L", "w2": "L", "r1": 76, "r2": 76}, {"ap": 72, "a1": "T", "a2": "T", "t1": "T", "f1": 0.9, "t2": "T", "f2": 0.78, "jsd": 0.0314, "mi1": 71, "mi2": 63, "w1": "T", "w2": "T", "r1": 77, "r2": 77}, {"ap": 73, "a1": "L", "a2": "A", "t1": "L", "f1": 0.9, "t2": "A", "f2": 0.52, "jsd": 0.4123, "mi1": 72, "mi2": 64, "w1": "H", "w2": "H", "r1": 78, "r2": 78}, {"ap": 74, "a1": "S", "a2": "T", "t1": "S", "f1": 0.533, "t2": "T", "f2": 0.947, "jsd": 0.386, "mi1": 73, "mi2": 65, "w1": "T", "w2": "T", "r1": 79, "r2": 79}, {"ap": 75, "a1": "I", "a2": "I", "t1": "I", "f1": 1.0, "t2": "I", "f2": 1.0, "jsd": 0.0, "mi1": 74, "mi2": 66, "w1": "I", "w2": "I", "r1": 80, "r2": 80}, {"ap": 76, "a1": "S", "a2": "S", "t1": "S", "f1": 0.74, "t2": "S", "f2": 1.0, "jsd": 0.1441, "mi1": 75, "mi2": 67, "w1": "S", "w2": "S", "r1": 81, "r2": 81}, {"ap": 77, "a1": "R", "a2": "R", "t1": "R", "f1": 0.473, "t2": "R", "f2": 0.333, "jsd": 0.0789, "mi1": 76, "mi2": 68, "w1": "R", "w2": "R", "r1": 82, "r2": 82}, {"ap": 78, "a1": "I", "a2": "I", "t1": "I", "f1": 0.507, "t2": "I", "f2": 0.353, "jsd": 0.2022, "mi1": 77, "mi2": 69, "w1": "I", "w2": "I", "r1": 83, "r2": 83}, {"ap": 79, "a1": "R", "a2": "S", "t1": "R", "f1": 0.54, "t2": "S", "f2": 0.313, "jsd": 0.1838, "mi1": 78, "mi2": 70, "w1": "A", "w2": "A", "r1": 84, "r2": 84}, {"ap": 80, "a1": "K", "a2": "A", "t1": "K", "f1": 0.487, "t2": "A", "f2": 0.853, "jsd": 0.7317, "mi1": 79, "mi2": 71, "w1": "V", "w2": "V", "r1": 85, "r2": 85}, {"ap": 81, "a1": "D", "a2": "S", "t1": "D", "f1": 0.367, "t2": "S", "f2": 0.62, "jsd": 0.341, "mi1": 80, "mi2": 72, "w1": "S", "w2": "S", "r1": 86, "r2": 86}, {"ap": 82, "a1": "G", "a2": "S", "t1": "G", "f1": 0.66, "t2": "S", "f2": 0.487, "jsd": 0.7134, "mi1": 81, "mi2": 73, "w1": "Y", "w2": "Y", "r1": 87, "r2": 87}, {"ap": 83, "a1": "G", "a2": "G", "t1": "G", "f1": 0.807, "t2": "G", "f2": 0.88, "jsd": 0.0722, "mi1": 82, "mi2": 74, "w1": "Q", "w2": "Q", "r1": 88, "r2": 88}, {"ap": 84, "a1": "G", "a2": "T", "t1": "G", "f1": 0.893, "t2": "T", "f2": 0.3, "jsd": 0.8326, "mi1": 83, "mi2": 75, "w1": "T", "w2": "T", "r1": 89, "r2": 89}, {"ap": 85, "a1": "P", "a2": "E", "t1": "P", "f1": 0.773, "t2": "E", "f2": 0.487, "jsd": 0.6878, "mi1": 84, "mi2": 76, "w1": "K", "w2": "K", "r1": 90, "r2": 90}, {"ap": 86, "a1": "E", "a2": "T", "t1": "E", "f1": 0.453, "t2": "T", "f2": 0.68, "jsd": 0.4948, "mi1": 85, "mi2": 77, "w1": "V", "w2": "V", "r1": 91, "r2": 91}, {"ap": 87, "a1": "L", "a2": "P", "t1": "L", "f1": 0.487, "t2": "P", "f2": 0.813, "jsd": 0.7335, "mi1": 86, "mi2": 78, "w1": "N", "w2": "N", "r1": 92, "r2": 92}, {"ap": 88, "a1": "L", "a2": "L", "t1": "L", "f1": 1.0, "t2": "L", "f2": 1.0, "jsd": 0.0, "mi1": 87, "mi2": 79, "w1": "L", "w2": "L", "r1": 93, "r2": 93}, {"ap": 89, "a1": "L", "a2": "L", "t1": "L", "f1": 0.913, "t2": "L", "f2": 1.0, "jsd": 0.0447, "mi1": 88, "mi2": 80, "w1": "L", "w2": "L", "r1": 94, "r2": 94}, {"ap": 90, "a1": "S", "a2": "S", "t1": "S", "f1": 0.627, "t2": "S", "f2": 0.907, "jsd": 0.2519, "mi1": 89, "mi2": 81, "w1": "S", "w2": "S", "r1": 95, "r2": 95}, {"ap": 91, "a1": "A", "a2": "A", "t1": "A", "f1": 0.873, "t2": "A", "f2": 0.82, "jsd": 0.0949, "mi1": 90, "mi2": 82, "w1": "A", "w2": "A", "r1": 96, "r2": 96}, {"ap": 92, "a1": "K", "a2": "K", "t1": "K", "f1": 0.507, "t2": "K", "f2": 0.453, "jsd": 0.0731, "mi1": 91, "mi2": 83, "w1": "I", "w2": "I", "r1": 97, "r2": 97}, {"ap": 93, "a1": "V", "a2": "V", "t1": "V", "f1": 0.547, "t2": "V", "f2": 0.553, "jsd": 0.2473, "mi1": 92, "mi2": 84, "w1": "K", "w2": "K", "r1": 98, "r2": 98}, {"ap": 94, "a1": "T", "a2": "T", "t1": "T", "f1": 1.0, "t2": "T", "f2": 0.987, "jsd": 0.0067, "mi1": 93, "mi2": 85, "w1": "S", "w2": "S", "r1": 99, "r2": 99}, {"ap": 95, "a1": "P", "a2": "P", "t1": "P", "f1": 1.0, "t2": "P", "f2": 1.0, "jsd": 0.0, "mi1": 94, "mi2": 86, "w1": "P", "w2": "P", "r1": 100, "r2": 100}, {"ap": 96, "a1": "C", "a2": "C", "t1": "C", "f1": 1.0, "t2": "C", "f2": 1.0, "jsd": 0.0, "mi1": 95, "mi2": 87, "w1": "C", "w2": "C", "r1": 101, "r2": 101}, {"ap": 97, "a1": "V", "a2": "-", "t1": "V", "f1": 0.947, "t2": "-", "f2": 0.0, "jsd": 0.5, "mi1": 96, "mi2": null, "w1": "Q", "w2": "-", "r1": 102, "r2": null}, {"ap": 98, "a1": "G", "a2": "-", "t1": "G", "f1": 0.893, "t2": "-", "f2": 0.0, "jsd": 0.5, "mi1": 97, "mi2": null, "w1": "R", "w2": "-", "r1": 103, "r2": null}, {"ap": 99, "a1": "G", "a2": "S", "t1": "G", "f1": 0.553, "t2": "S", "f2": 0.553, "jsd": 0.7818, "mi1": 98, "mi2": 88, "w1": "E", "w2": "K", "r1": 104, "r2": 112}, {"ap": 100, "a1": "T", "a2": "T", "t1": "T", "f1": 0.447, "t2": "T", "f2": 0.593, "jsd": 0.3736, "mi1": 99, "mi2": 89, "w1": "T", "w2": "P", "r1": 105, "r2": 113}, {"ap": 101, "a1": "D", "a2": "-", "t1": "D", "f1": 0.967, "t2": "-", "f2": 0.0, "jsd": 0.5, "mi1": 100, "mi2": null, "w1": "P", "w2": "-", "r1": 106, "r2": null}, {"ap": 102, "a1": "P", "a2": "-", "t1": "P", "f1": 0.353, "t2": "-", "f2": 0.0, "jsd": 0.5, "mi1": 101, "mi2": null, "w1": "E", "w2": "-", "r1": 107, "r2": null}, {"ap": 103, "a1": "P", "a2": "-", "t1": "P", "f1": 0.353, "t2": "-", "f2": 0.0, "jsd": 0.5, "mi1": 102, "mi2": null, "w1": "G", "w2": "-", "r1": 108, "r2": null}, {"ap": 104, "a1": "D", "a2": "-", "t1": "D", "f1": 0.307, "t2": "-", "f2": 0.0, "jsd": 0.5, "mi1": 103, "mi2": null, "w1": "A", "w2": "-", "r1": 109, "r2": null}, {"ap": 105, "a1": "G", "a2": "-", "t1": "G", "f1": 0.987, "t2": "-", "f2": 0.0, "jsd": 0.5, "mi1": 104, "mi2": null, "w1": "E", "w2": "-", "r1": 110, "r2": null}, {"ap": 106, "a1": "G", "a2": "-", "t1": "G", "f1": 1.0, "t2": "-", "f2": 0.0, "jsd": 0.5, "mi1": 105, "mi2": null, "w1": "A", "w2": "-", "r1": 111, "r2": null}, {"ap": 107, "a1": "K", "a2": "K", "t1": "K", "f1": 0.453, "t2": "K", "f2": 0.28, "jsd": 0.3403, "mi1": 106, "mi2": 90, "w1": "K", "w2": "W", "r1": 112, "r2": 114}, {"ap": 108, "a1": "T", "a2": "-", "t1": "T", "f1": 0.627, "t2": "-", "f2": 0.0, "jsd": 0.5, "mi1": 107, "mi2": null, "w1": "P", "w2": "-", "r1": 113, "r2": null}, {"ap": 109, "a1": "V", "a2": "-", "t1": "V", "f1": 0.787, "t2": "-", "f2": 0.0, "jsd": 0.5, "mi1": 108, "mi2": null, "w1": "W", "w2": "-", "r1": 114, "r2": null}, {"ap": 110, "a1": "Y", "a2": "Y", "t1": "Y", "f1": 0.96, "t2": "Y", "f2": 0.947, "jsd": 0.0213, "mi1": 109, "mi2": 91, "w1": "Y", "w2": "Y", "r1": 115, "r2": 115}, {"ap": 111, "a1": "V", "a2": "V", "t1": "V", "f1": 0.787, "t2": "V", "f2": 0.927, "jsd": 0.0871, "mi1": 110, "mi2": 92, "w1": "E", "w2": "E", "r1": 116, "r2": 116}, {"ap": 112, "a1": "P", "a2": "P", "t1": "P", "f1": 1.0, "t2": "P", "f2": 1.0, "jsd": 0.0, "mi1": 111, "mi2": 93, "w1": "P", "w2": "P", "r1": 117, "r2": 117}, {"ap": 113, "a1": "L", "a2": "L", "t1": "L", "f1": 0.933, "t2": "L", "f2": 1.0, "jsd": 0.0342, "mi1": 112, "mi2": 94, "w1": "I", "w2": "I", "r1": 118, "r2": 118}, {"ap": 114, "a1": "V", "a2": "F", "t1": "V", "f1": 0.58, "t2": "F", "f2": 0.907, "jsd": 0.9304, "mi1": 113, "mi2": 95, "w1": "Y", "w2": "Y", "r1": 119, "r2": 119}, {"ap": 115, "a1": "L", "a2": "L", "t1": "L", "f1": 1.0, "t2": "L", "f2": 1.0, "jsd": 0.0, "mi1": 114, "mi2": 96, "w1": "L", "w2": "L", "r1": 120, "r2": 120}, {"ap": 116, "a1": "V", "a2": "S", "t1": "V", "f1": 0.573, "t2": "S", "f2": 0.773, "jsd": 0.9122, "mi1": 115, "mi2": 97, "w1": "G", "w2": "G", "r1": 121, "r2": 121}, {"ap": 117, "a1": "G", "a2": "G", "t1": "G", "f1": 0.84, "t2": "G", "f2": 1.0, "jsd": 0.085, "mi1": 116, "mi2": 98, "w1": "G", "w2": "G", "r1": 122, "r2": 122}, {"ap": 118, "a1": "V", "a2": "V", "t1": "V", "f1": 1.0, "t2": "V", "f2": 1.0, "jsd": 0.0, "mi1": 117, "mi2": 99, "w1": "V", "w2": "V", "r1": 123, "r2": 123}, {"ap": 119, "a1": "V", "a2": "F", "t1": "V", "f1": 0.52, "t2": "F", "f2": 1.0, "jsd": 0.3328, "mi1": 118, "mi2": 100, "w1": "F", "w2": "F", "r1": 124, "r2": 124}, {"ap": 120, "a1": "E", "a2": "E", "t1": "E", "f1": 0.367, "t2": "E", "f2": 0.473, "jsd": 0.1544, "mi1": 119, "mi2": 101, "w1": "Q", "w2": "Q", "r1": 125, "r2": 125}, {"ap": 121, "a1": "L", "a2": "L", "t1": "L", "f1": 1.0, "t2": "L", "f2": 1.0, "jsd": 0.0, "mi1": 120, "mi2": 102, "w1": "L", "w2": "L", "r1": 126, "r2": 126}, {"ap": 122, "a1": "E", "a2": "E", "t1": "E", "f1": 0.5, "t2": "E", "f2": 0.567, "jsd": 0.1983, "mi1": 121, "mi2": 103, "w1": "E", "w2": "E", "r1": 127, "r2": 127}, {"ap": 123, "a1": "A", "a2": "A", "t1": "A", "f1": 0.707, "t2": "A", "f2": 0.827, "jsd": 0.0455, "mi1": 122, "mi2": 104, "w1": "K", "w2": "K", "r1": 128, "r2": 128}, {"ap": 124, "a1": "G", "a2": "G", "t1": "G", "f1": 1.0, "t2": "G", "f2": 1.0, "jsd": 0.0, "mi1": 123, "mi2": 105, "w1": "G", "w2": "G", "r1": 129, "r2": 129}, {"ap": 125, "a1": "D", "a2": "D", "t1": "D", "f1": 1.0, "t2": "D", "f2": 1.0, "jsd": 0.0, "mi1": 124, "mi2": 106, "w1": "D", "w2": "D", "r1": 130, "r2": 130}, {"ap": 126, "a1": "L", "a2": "R", "t1": "L", "f1": 0.407, "t2": "R", "f2": 0.567, "jsd": 0.3702, "mi1": 125, "mi2": 107, "w1": "R", "w2": "R", "r1": 131, "r2": 131}, {"ap": 127, "a1": "L", "a2": "L", "t1": "L", "f1": 0.993, "t2": "L", "f2": 1.0, "jsd": 0.0033, "mi1": 126, "mi2": 108, "w1": "L", "w2": "L", "r1": 132, "r2": 132}, {"ap": 128, "a1": "S", "a2": "S", "t1": "S", "f1": 0.553, "t2": "S", "f2": 0.74, "jsd": 0.1503, "mi1": 127, "mi2": 109, "w1": "S", "w2": "S", "r1": 133, "r2": 133}, {"ap": 129, "a1": "A", "a2": "C", "t1": "A", "f1": 0.7, "t2": "C", "f2": 0.3, "jsd": 0.6344, "mi1": 128, "mi2": 110, "w1": "A", "w2": "A", "r1": 134, "r2": 134}, {"ap": 130, "a1": "T", "a2": "T", "t1": "T", "f1": 0.567, "t2": "T", "f2": 0.867, "jsd": 0.1499, "mi1": 129, "mi2": 111, "w1": "E", "w2": "E", "r1": 135, "r2": 135}, {"ap": 131, "a1": "V", "a2": "V", "t1": "V", "f1": 1.0, "t2": "V", "f2": 1.0, "jsd": 0.0, "mi1": 130, "mi2": 112, "w1": "I", "w2": "I", "r1": 136, "r2": 136}, {"ap": 132, "a1": "N", "a2": "N", "t1": "N", "f1": 1.0, "t2": "N", "f2": 1.0, "jsd": 0.0, "mi1": 131, "mi2": 113, "w1": "N", "w2": "N", "r1": 137, "r2": 137}, {"ap": 133, "a1": "N", "a2": "R", "t1": "N", "f1": 0.627, "t2": "R", "f2": 0.507, "jsd": 0.2781, "mi1": 132, "mi2": 114, "w1": "R", "w2": "R", "r1": 138, "r2": 138}, {"ap": 134, "a1": "P", "a2": "P", "t1": "P", "f1": 1.0, "t2": "P", "f2": 1.0, "jsd": 0.0, "mi1": 133, "mi2": 115, "w1": "P", "w2": "P", "r1": 139, "r2": 139}, {"ap": 135, "a1": "E", "a2": "E", "t1": "E", "f1": 0.553, "t2": "E", "f2": 0.8, "jsd": 0.1071, "mi1": 134, "mi2": 116, "w1": "D", "w2": "D", "r1": 140, "r2": 140}, {"ap": 136, "a1": "Y", "a2": "Y", "t1": "Y", "f1": 0.927, "t2": "Y", "f2": 0.873, "jsd": 0.0128, "mi1": 135, "mi2": 117, "w1": "Y", "w2": "Y", "r1": 141, "r2": 141}, {"ap": 137, "a1": "L", "a2": "L", "t1": "L", "f1": 1.0, "t2": "L", "f2": 1.0, "jsd": 0.0, "mi1": 136, "mi2": 118, "w1": "L", "w2": "L", "r1": 142, "r2": 142}, {"ap": 138, "a1": "D", "a2": "D", "t1": "D", "f1": 0.613, "t2": "D", "f2": 1.0, "jsd": 0.2271, "mi1": 137, "mi2": 119, "w1": "L", "w2": "D", "r1": 143, "r2": 143}, {"ap": 139, "a1": "R", "a2": "N", "t1": "R", "f1": 0.767, "t2": "N", "f2": 0.667, "jsd": 0.9106, "mi1": 138, "mi2": 120, "w1": "F", "w2": "F", "r1": 144, "r2": 144}, {"ap": 140, "a1": "D", "a2": "S", "t1": "D", "f1": 0.547, "t2": "S", "f2": 1.0, "jsd": 0.408, "mi1": 139, "mi2": 121, "w1": "A", "w2": "A", "r1": 145, "r2": 145}, {"ap": 141, "a1": "S", "a2": "S", "t1": "S", "f1": 0.64, "t2": "S", "f2": 0.793, "jsd": 0.1038, "mi1": 140, "mi2": 122, "w1": "E", "w2": "E", "r1": 146, "r2": 146}, {"ap": 142, "a1": "S", "a2": "S", "t1": "S", "f1": 0.607, "t2": "S", "f2": 0.607, "jsd": 0.2596, "mi1": 141, "mi2": 123, "w1": "S", "w2": "S", "r1": 147, "r2": 147}, {"ap": 143, "a1": "G", "a2": "G", "t1": "G", "f1": 1.0, "t2": "G", "f2": 1.0, "jsd": 0.0, "mi1": 142, "mi2": 124, "w1": "G", "w2": "G", "r1": 148, "r2": 148}, {"ap": 144, "a1": "S", "a2": "R", "t1": "S", "f1": 0.627, "t2": "R", "f2": 0.5, "jsd": 0.94, "mi1": 143, "mi2": 125, "w1": "Q", "w2": "Q", "r1": 149, "r2": 149}, {"ap": 145, "a1": "N", "a2": "N", "t1": "N", "f1": 0.993, "t2": "N", "f2": 1.0, "jsd": 0.0033, "mi1": 144, "mi2": 126, "w1": "V", "w2": "V", "r1": 150, "r2": 150}, {"ap": 146, "a1": "Y", "a2": "Y", "t1": "Y", "f1": 0.88, "t2": "Y", "f2": 0.793, "jsd": 0.01, "mi1": 145, "mi2": 127, "w1": "Y", "w2": "Y", "r1": 151, "r2": 151}, {"ap": 147, "a1": "F", "a2": "F", "t1": "F", "f1": 1.0, "t2": "F", "f2": 1.0, "jsd": 0.0, "mi1": 146, "mi2": 128, "w1": "F", "w2": "F", "r1": 152, "r2": 152}, {"ap": 148, "a1": "G", "a2": "G", "t1": "G", "f1": 1.0, "t2": "G", "f2": 1.0, "jsd": 0.0, "mi1": 147, "mi2": 129, "w1": "G", "w2": "G", "r1": 153, "r2": 153}, {"ap": 149, "a1": "V", "a2": "I", "t1": "V", "f1": 0.713, "t2": "I", "f2": 0.9, "jsd": 0.4104, "mi1": 148, "mi2": 130, "w1": "I", "w2": "I", "r1": 154, "r2": 154}, {"ap": 150, "a1": "V", "a2": "L", "t1": "V", "f1": 0.973, "t2": "L", "f2": 0.913, "jsd": 1.0, "mi1": 149, "mi2": 131, "w1": "I", "w2": "I", "r1": 155, "r2": 155}, {"ap": 151, "a1": "E", "a2": "Q", "t1": "E", "f1": 0.833, "t2": "Q", "f2": 0.773, "jsd": 0.5411, "mi1": 150, "mi2": 132, "w1": "A", "w2": "A", "r1": 156, "r2": 156}, {"ap": 152, "a1": "L", "a2": "L", "t1": "L", "f1": 0.987, "t2": "L", "f2": 1.0, "jsd": 0.0067, "mi1": 151, "mi2": 133, "w1": "L", "w2": "L", "r1": 157, "r2": 157}];
+const TOP_DIVERGENT = [{"ap": 26, "a1": "G", "a2": "D", "t1": "G", "f1": 1.0, "t2": "D", "f2": 0.8, "jsd": 1.0, "mi1": 25, "mi2": 20, "w1": "R", "w2": "R", "r1": 31, "r2": 31}, {"ap": 150, "a1": "V", "a2": "L", "t1": "V", "f1": 0.973, "t2": "L", "f2": 0.913, "jsd": 1.0, "mi1": 149, "mi2": 131, "w1": "I", "w2": "I", "r1": 155, "r2": 155}, {"ap": 58, "a1": "Q", "a2": "L", "t1": "Q", "f1": 0.94, "t2": "L", "f2": 1.0, "jsd": 0.9711, "mi1": 57, "mi2": 52, "w1": "L", "w2": "L", "r1": 63, "r2": 63}, {"ap": 144, "a1": "S", "a2": "R", "t1": "S", "f1": 0.627, "t2": "R", "f2": 0.5, "jsd": 0.94, "mi1": 143, "mi2": 125, "w1": "Q", "w2": "Q", "r1": 149, "r2": 149}, {"ap": 114, "a1": "V", "a2": "F", "t1": "V", "f1": 0.58, "t2": "F", "f2": 0.907, "jsd": 0.9304, "mi1": 113, "mi2": 95, "w1": "Y", "w2": "Y", "r1": 119, "r2": 119}, {"ap": 116, "a1": "V", "a2": "S", "t1": "V", "f1": 0.573, "t2": "S", "f2": 0.773, "jsd": 0.9122, "mi1": 115, "mi2": 97, "w1": "G", "w2": "G", "r1": 121, "r2": 121}, {"ap": 139, "a1": "R", "a2": "N", "t1": "R", "f1": 0.767, "t2": "N", "f2": 0.667, "jsd": 0.9106, "mi1": 138, "mi2": 120, "w1": "F", "w2": "F", "r1": 144, "r2": 144}, {"ap": 48, "a1": "D", "a2": "S", "t1": "D", "f1": 0.72, "t2": "S", "f2": 0.947, "jsd": 0.8853, "mi1": 47, "mi2": 42, "w1": "E", "w2": "E", "r1": 53, "r2": 53}, {"ap": 84, "a1": "G", "a2": "T", "t1": "G", "f1": 0.893, "t2": "T", "f2": 0.3, "jsd": 0.8326, "mi1": 83, "mi2": 75, "w1": "T", "w2": "T", "r1": 89, "r2": 89}, {"ap": 99, "a1": "G", "a2": "S", "t1": "G", "f1": 0.553, "t2": "S", "f2": 0.553, "jsd": 0.7818, "mi1": 98, "mi2": 88, "w1": "E", "w2": "K", "r1": 104, "r2": 112}, {"ap": 87, "a1": "L", "a2": "P", "t1": "L", "f1": 0.487, "t2": "P", "f2": 0.813, "jsd": 0.7335, "mi1": 86, "mi2": 78, "w1": "N", "w2": "N", "r1": 92, "r2": 92}, {"ap": 80, "a1": "K", "a2": "A", "t1": "K", "f1": 0.487, "t2": "A", "f2": 0.853, "jsd": 0.7317, "mi1": 79, "mi2": 71, "w1": "V", "w2": "V", "r1": 85, "r2": 85}, {"ap": 18, "a1": "P", "a2": "V", "t1": "P", "f1": 0.707, "t2": "V", "f2": 0.407, "jsd": 0.7241, "mi1": 17, "mi2": 12, "w1": "E", "w2": "E", "r1": 23, "r2": 23}, {"ap": 82, "a1": "G", "a2": "S", "t1": "G", "f1": 0.66, "t2": "S", "f2": 0.487, "jsd": 0.7134, "mi1": 81, "mi2": 73, "w1": "Y", "w2": "Y", "r1": 87, "r2": 87}, {"ap": 27, "a1": "G", "a2": "A", "t1": "G", "f1": 0.36, "t2": "A", "f2": 0.913, "jsd": 0.7112, "mi1": 26, "mi2": 21, "w1": "R", "w2": "R", "r1": 32, "r2": 32}, {"ap": 85, "a1": "P", "a2": "E", "t1": "P", "f1": 0.773, "t2": "E", "f2": 0.487, "jsd": 0.6878, "mi1": 84, "mi2": 76, "w1": "K", "w2": "K", "r1": 90, "r2": 90}, {"ap": 31, "a1": "I", "a2": "L", "t1": "I", "f1": 0.827, "t2": "L", "f2": 1.0, "jsd": 0.6456, "mi1": 30, "mi2": 25, "w1": "L", "w2": "L", "r1": 36, "r2": 36}, {"ap": 24, "a1": "T", "a2": "V", "t1": "T", "f1": 0.813, "t2": "V", "f2": 0.627, "jsd": 0.6411, "mi1": 23, "mi2": 18, "w1": "L", "w2": "L", "r1": 29, "r2": 29}, {"ap": 129, "a1": "A", "a2": "C", "t1": "A", "f1": 0.7, "t2": "C", "f2": 0.3, "jsd": 0.6344, "mi1": 128, "mi2": 110, "w1": "A", "w2": "A", "r1": 134, "r2": 134}, {"ap": 12, "a1": "T", "a2": "V", "t1": "T", "f1": 0.513, "t2": "V", "f2": 0.667, "jsd": 0.6023, "mi1": 11, "mi2": 6, "w1": "V", "w2": "V", "r1": 17, "r2": 17}];
+
+// Correct monomer_index -> PDB_resnum mapping (accounts for ProteinMPNN cleaning)
+// These are derived from POSITIONS data which was precomputed in Python.
+const CLEANED_RESNUMS_1TNF = POSITIONS.filter(p => p.r1 !== null).map(p => p.r1);
+const CLEANED_RESNUMS_6OOY = POSITIONS.filter(p => p.r2 !== null).map(p => p.r2);
+
+// ===== Color mapping (for alignment/table display) =====
+function divToRgb(div) {
+    // Blue (0) -> White (0.5) -> Red (1)
+    let r, g, b;
+    if (div <= 0.5) {
+        const t = div * 2;
+        r = Math.round(t * 255);
+        g = Math.round(t * 255);
+        b = 255;
+    } else {
+        const t = (div - 0.5) * 2;
+        r = 255;
+        g = Math.round((1 - t) * 255);
+        b = Math.round((1 - t) * 255);
+    }
+    return [r, g, b];
+}
+
+function divToCss(div) {
+    const [r, g, b] = divToRgb(div);
+    return `rgb(${r},${g},${b})`;
+}
+
+function textColorForDiv(div) {
+    const [r, g, b] = divToRgb(div);
+    const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+    return lum > 140 ? '#222' : '#fff';
+}
+
+// ===== PDB parsing =====
+function buildResnumDivMap(positions, resnumKey) {
+    const m = {};
+    for (const p of positions) {
+        const resnum = p[resnumKey];
+        if (resnum !== null) {
+            m[resnum] = p.jsd;
+        }
+    }
+    return m;
+}
+
+// Replace B-factor column in PDB with divergence values (scaled 0-99)
+function replaceBfactors(pdbText, divMap) {
+    return pdbText.split('\n').map(line => {
+        if (line.startsWith('ATOM') || line.startsWith('HETATM')) {
+            const resNum = parseInt(line.substring(22, 26).trim());
+            const div = divMap[resNum];
+            if (div !== undefined) {
+                const bfac = (div * 99).toFixed(2).padStart(6);
+                return line.substring(0, 60) + bfac + line.substring(66);
+            } else {
+                // Residues not in our mapping get 0
+                return line.substring(0, 60) + '  0.00' + line.substring(66);
+            }
+        }
+        return line;
+    }).join('\n');
+}
+
+// ===== Mol* viewers =====
+let plugin1 = null, plugin2 = null;
+
+async function fetchPdb(pdbId) {
+    const url = `https://files.rcsb.org/download/${pdbId}.pdb`;
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`Failed to fetch ${pdbId}: ${resp.status}`);
+    return await resp.text();
+}
+
+// ===== Structural superposition (Kabsch algorithm) =====
+// Extract CA atom coords for chain A, keyed by residue number
+function getCAcoords(pdbText) {
+    const cas = {};
+    for (const line of pdbText.split('\n')) {
+        if (!line.startsWith('ATOM')) continue;
+        const atomName = line.substring(12, 16).trim();
+        const chain = line[21];
+        if (atomName !== 'CA' || (chain !== 'A' && chain !== ' ')) continue;
+        const resNum = parseInt(line.substring(22, 26).trim());
+        const x = parseFloat(line.substring(30, 38));
+        const y = parseFloat(line.substring(38, 46));
+        const z = parseFloat(line.substring(46, 54));
+        if (!cas[resNum]) cas[resNum] = [x, y, z];
+    }
+    return cas;
+}
+
+// Kabsch: find rotation R and translation t so that R * mobile + t ~= target
+// Returns { R: 3x3 array, t: [tx,ty,tz] }
+function kabschAlign(targetCoords, mobileCoords) {
+    const n = targetCoords.length;
+    // Compute centroids
+    let ct = [0,0,0], cm = [0,0,0];
+    for (let i = 0; i < n; i++) {
+        for (let j = 0; j < 3; j++) { ct[j] += targetCoords[i][j]; cm[j] += mobileCoords[i][j]; }
+    }
+    ct = ct.map(v => v/n);
+    cm = cm.map(v => v/n);
+
+    // Center the coordinates
+    const P = mobileCoords.map(c => [c[0]-cm[0], c[1]-cm[1], c[2]-cm[2]]);
+    const Q = targetCoords.map(c => [c[0]-ct[0], c[1]-ct[1], c[2]-ct[2]]);
+
+    // Compute cross-covariance matrix H = P^T * Q (3x3)
+    const H = [[0,0,0],[0,0,0],[0,0,0]];
+    for (let i = 0; i < n; i++) {
+        for (let r = 0; r < 3; r++) {
+            for (let c = 0; c < 3; c++) {
+                H[r][c] += P[i][r] * Q[i][c];
+            }
+        }
+    }
+
+    // SVD of H using Jacobi iterations (simple 3x3 SVD)
+    const { U, V } = svd3x3(H);
+
+    // R = V * U^T, ensuring proper rotation (det=+1)
+    let R = matMul3(V, transpose3(U));
+    if (det3(R) < 0) {
+        // Flip last column of V
+        V[0][2] *= -1; V[1][2] *= -1; V[2][2] *= -1;
+        R = matMul3(V, transpose3(U));
+    }
+
+    // Translation: t = ct - R * cm
+    const Rcm = matVec3(R, cm);
+    const t = [ct[0]-Rcm[0], ct[1]-Rcm[1], ct[2]-Rcm[2]];
+
+    return { R, t };
+}
+
+// 3x3 matrix helpers
+function transpose3(M) { return [[M[0][0],M[1][0],M[2][0]],[M[0][1],M[1][1],M[2][1]],[M[0][2],M[1][2],M[2][2]]]; }
+function matMul3(A,B) {
+    const C = [[0,0,0],[0,0,0],[0,0,0]];
+    for (let i=0;i<3;i++) for (let j=0;j<3;j++) for (let k=0;k<3;k++) C[i][j]+=A[i][k]*B[k][j];
+    return C;
+}
+function matVec3(M,v) { return [M[0][0]*v[0]+M[0][1]*v[1]+M[0][2]*v[2], M[1][0]*v[0]+M[1][1]*v[1]+M[1][2]*v[2], M[2][0]*v[0]+M[2][1]*v[1]+M[2][2]*v[2]]; }
+function det3(M) { return M[0][0]*(M[1][1]*M[2][2]-M[1][2]*M[2][1])-M[0][1]*(M[1][0]*M[2][2]-M[1][2]*M[2][0])+M[0][2]*(M[1][0]*M[2][1]-M[1][1]*M[2][0]); }
+
+// Simple 3x3 SVD via eigendecomposition of H^T*H
+function svd3x3(H) {
+    const Ht = transpose3(H);
+    const HtH = matMul3(Ht, H);
+    const { eigenvalues, eigenvectors } = eigenDecomp3(HtH);
+
+    // V = eigenvectors (columns), sorted by descending eigenvalue
+    const idx = [0,1,2].sort((a,b) => eigenvalues[b]-eigenvalues[a]);
+    const V = [[0,0,0],[0,0,0],[0,0,0]];
+    for (let i=0;i<3;i++) for (let j=0;j<3;j++) V[i][j] = eigenvectors[i][idx[j]];
+
+    // U = H * V * Sigma^-1
+    const HV = matMul3(H, V);
+    const U = [[0,0,0],[0,0,0],[0,0,0]];
+    for (let j=0;j<3;j++) {
+        const sigma = Math.sqrt(Math.max(eigenvalues[idx[j]], 1e-10));
+        for (let i=0;i<3;i++) U[i][j] = HV[i][j] / sigma;
+    }
+
+    return { U, V };
+}
+
+// 3x3 symmetric matrix eigendecomposition via Jacobi iteration
+function eigenDecomp3(A) {
+    const a = [[A[0][0],A[0][1],A[0][2]],[A[1][0],A[1][1],A[1][2]],[A[2][0],A[2][1],A[2][2]]];
+    const v = [[1,0,0],[0,1,0],[0,0,1]];
+    for (let iter = 0; iter < 50; iter++) {
+        // Find largest off-diagonal
+        let p=0, q=1;
+        if (Math.abs(a[0][2]) > Math.abs(a[p][q])) { p=0; q=2; }
+        if (Math.abs(a[1][2]) > Math.abs(a[p][q])) { p=1; q=2; }
+        if (Math.abs(a[p][q]) < 1e-12) break;
+
+        const theta = 0.5 * Math.atan2(2*a[p][q], a[q][q]-a[p][p]);
+        const c = Math.cos(theta), s = Math.sin(theta);
+
+        // Givens rotation
+        const G = [[1,0,0],[0,1,0],[0,0,1]];
+        G[p][p]=c; G[q][q]=c; G[p][q]=s; G[q][p]=-s;
+
+        // a = G^T * a * G
+        const tmp = matMul3(transpose3(G), matMul3(a, G));
+        for (let i=0;i<3;i++) for (let j=0;j<3;j++) a[i][j]=tmp[i][j];
+
+        // v = v * G
+        const tmpv = matMul3(v, G);
+        for (let i=0;i<3;i++) for (let j=0;j<3;j++) v[i][j]=tmpv[i][j];
+    }
+    return { eigenvalues: [a[0][0], a[1][1], a[2][2]], eigenvectors: v };
+}
+
+// Apply rotation R and translation t to all ATOM/HETATM in PDB text
+function applyTransformPdb(pdbText, R, t) {
+    return pdbText.split('\n').map(line => {
+        if (!line.startsWith('ATOM') && !line.startsWith('HETATM')) return line;
+        const x = parseFloat(line.substring(30, 38));
+        const y = parseFloat(line.substring(38, 46));
+        const z = parseFloat(line.substring(46, 54));
+        const nx = R[0][0]*x + R[0][1]*y + R[0][2]*z + t[0];
+        const ny = R[1][0]*x + R[1][1]*y + R[1][2]*z + t[1];
+        const nz = R[2][0]*x + R[2][1]*y + R[2][2]*z + t[2];
+        return line.substring(0,30) + nx.toFixed(3).padStart(8) + ny.toFixed(3).padStart(8) + nz.toFixed(3).padStart(8) + line.substring(54);
+    }).join('\n');
+}
+
+// Superpose mobile PDB onto target PDB using aligned residues
+// Uses precomputed PDB residue numbers (r1, r2) from POSITIONS data.
+function superposePdb(targetPdb, mobilePdb) {
+    const targetCAs = getCAcoords(targetPdb);
+    const mobileCAs = getCAcoords(mobilePdb);
+
+    // Collect paired CA coords for aligned positions using correct PDB resnums
+    const tCoords = [], mCoords = [];
+    for (const p of POSITIONS) {
+        if (p.r1 === null || p.r2 === null) continue;
+        if (targetCAs[p.r1] && mobileCAs[p.r2]) {
+            tCoords.push(targetCAs[p.r1]);
+            mCoords.push(mobileCAs[p.r2]);
+        }
+    }
+
+    if (tCoords.length < 3) return mobilePdb;
+    const { R, t } = kabschAlign(tCoords, mCoords);
+    console.log(`Superposition: ${tCoords.length} paired CAs, applied rotation+translation`);
+    return applyTransformPdb(mobilePdb, R, t);
+}
+
+async function applyUncertaintyColoring(plugin) {
+    // Wait briefly for the representation state tree to settle
+    await new Promise(r => setTimeout(r, 500));
+    const structs = plugin.managers.structure.hierarchy.current.structures;
+    for (const s of structs) {
+        for (const c of s.components) {
+            for (const repr of c.representations) {
+                const cell = repr.cell;
+                const ref = cell.transform.ref;
+                const oldParams = cell.transform.params;
+                const newParams = {
+                    ...oldParams,
+                    colorTheme: { name: 'uncertainty', params: {} }
+                };
+                await plugin.state.data.build().to(ref).update(newParams).commit();
+            }
+        }
+    }
+}
+
+async function loadPdbIntoViewer(elementId, pdbId, pdbText, resnumKey) {
+    const viewer = await molstar.Viewer.create(elementId, {
+        layoutIsExpanded: false,
+        layoutShowControls: true,
+        layoutShowSequence: true,
+        layoutShowRemoteState: false,
+        layoutShowLog: false,
+        viewportShowExpand: true,
+        viewportShowControls: true,
+        viewportShowSettings: true,
+        viewportShowSelectionMode: true,
+        collapseLeftPanel: true,
+        collapseRightPanel: true,
+    });
+    const plugin = viewer.plugin;
+
+    try {
+        const divMap = buildResnumDivMap(POSITIONS, resnumKey);
+        const modifiedPdb = replaceBfactors(pdbText, divMap);
+
+        const rawData = await plugin.builders.data.rawData({ data: modifiedPdb, label: pdbId });
+        const trajectory = await plugin.builders.structure.parseTrajectory(rawData, 'pdb');
+        await plugin.builders.structure.hierarchy.applyPreset(trajectory, 'default', { showUnitcell: false });
+        await applyUncertaintyColoring(plugin);
+
+        console.log(`${pdbId}: loaded with uncertainty coloring`);
+        return { plugin };
+    } catch (e) {
+        console.error(`Failed to load ${pdbId}:`, e);
+        return { plugin };
+    }
+}
+
+async function initViewers() {
+    // Fetch both PDBs
+    const [pdb1tnf, pdb6ooy] = await Promise.all([fetchPdb('1TNF'), fetchPdb('6OOY')]);
+
+    // Superpose 6OOY onto 1TNF coordinate frame using aligned CA atoms
+    const superposed6ooy = superposePdb(pdb1tnf, pdb6ooy);
+
+    // Load both into viewers (can be parallel since they're independent)
+    // Uses 'r1'/'r2' keys which hold correct PDB residue numbers (precomputed)
+    const [r1, r2] = await Promise.all([
+        loadPdbIntoViewer('viewer-1tnf', '1TNF', pdb1tnf, 'r1'),
+        loadPdbIntoViewer('viewer-6ooy', '6OOY', superposed6ooy, 'r2'),
+    ]);
+    plugin1 = r1.plugin;
+    plugin2 = r2.plugin;
+}
+
+// ===== Focus on residue via Mol* =====
+// Build a StructureElement.Loci for a single chain's residue (first matching unit).
+// Using only one chain avoids the bounding sphere spanning the entire homotrimer.
+function buildResidueLoci(plugin, resNum) {
+    const structs = plugin.managers.structure.hierarchy.current.structures;
+    if (!structs.length) return null;
+    const struct = structs[0].cell.obj?.data;
+    if (!struct) return null;
+
+    for (const unit of struct.units) {
+        if (!unit.conformation) continue;
+        const elements = unit.elements;
+        const residueIndex = unit.residueIndex;
+        const auth_seq_id = unit.model.atomicHierarchy.residues.auth_seq_id;
+
+        const indices = [];
+        for (let eIdx = 0; eIdx < elements.length; eIdx++) {
+            const eI = elements[eIdx];
+            const rI = residueIndex[eI];
+            if (auth_seq_id.value(rI) === resNum) {
+                indices.push(eIdx);
+            }
+        }
+        if (indices.length > 0) {
+            return {
+                kind: 'element-loci',
+                structure: struct,
+                elements: [{ unit, indices: Int32Array.from(indices) }]
+            };
+        }
+    }
+    return null;
+}
+
+function focusMolstarOnResidue(plugin, resNum) {
+    try {
+        const loci = buildResidueLoci(plugin, resNum);
+        if (!loci) return;
+        plugin.managers.structure.focus.setFromLoci(loci);
+        setTimeout(() => { plugin.managers.camera.focusLoci(loci); }, 50);
+    } catch (e) {
+        console.warn('Focus failed:', resNum, e.message || e);
+    }
+}
+
+function focusResidue(pos) {
+    const p = POSITIONS.find(d => d.ap === pos);
+    if (!p) return;
+
+    if (p.r1 !== null && plugin1) {
+        focusMolstarOnResidue(plugin1, p.r1);
+    }
+    if (p.r2 !== null && plugin2) {
+        focusMolstarOnResidue(plugin2, p.r2);
+    }
+}
+
+// ===== Alignment display =====
+function renderAlignment() {
+    const container = document.getElementById('alignment');
+    const lineLen = 50;
+    let html = '';
+
+    for (let start = 0; start < POSITIONS.length; start += lineLen) {
+        const chunk = POSITIONS.slice(start, start + lineLen);
+
+        html += '<div class="aln-block">';
+        html += '<div class="aln-pos-row"><span class="aln-label"></span>';
+        for (let i = 0; i < chunk.length; i++) {
+            const pos = start + i + 1;
+            if (pos === 1 || pos % 10 === 0) {
+                html += `<span class="aln-cell" style="color:#999;font-size:10px;background:none">${pos}</span>`;
+            } else {
+                html += '<span class="aln-cell" style="background:none"></span>';
+            }
+        }
+        html += '</div>';
+
+        // WT row (shared between both structures, show any differences)
+        html += '<div><span class="aln-label" style="color:#555;font-weight:600">WT</span>';
+        for (const p of chunk) {
+            const wt = p.w1 !== '-' ? p.w1 : p.w2;
+            const cls = wt === '-' ? ' gap' : '';
+            const wtMismatch = p.w1 !== '-' && p.w2 !== '-' && p.w1 !== p.w2;
+            const bg = wt === '-' ? '' : wtMismatch ? 'background:#fff3e0;color:#e65100;font-weight:700' : 'background:#f5f5f5;color:#555';
+            const title = wtMismatch ? `WT mismatch: 1TNF=${p.w1} 6OOY=${p.w2}` : `WT: ${wt}`;
+            html += `<span class="aln-cell${cls}" style="${bg}" data-pos="${p.ap}" title="${title}">${wtMismatch ? p.w1+'/'+p.w2 : wt}</span>`;
+        }
+        html += '</div>';
+
+        html += '<div><span class="aln-label" style="color:#1565c0">1TNF design</span>';
+        for (const p of chunk) {
+            const cls = p.a1 === '-' ? ' gap' : '';
+            const bg = p.a1 === '-' ? '' : `background:${divToCss(p.jsd)};color:${textColorForDiv(p.jsd)}`;
+            html += `<span class="aln-cell${cls}" style="${bg}" data-pos="${p.ap}" title="Pos ${p.ap}: cons=${p.a1} WT=${p.w1} JS=${p.jsd}">${p.a1}</span>`;
+        }
+        html += '</div>';
+
+        html += '<div><span class="aln-label" style="color:#c62828">6OOY design</span>';
+        for (const p of chunk) {
+            const cls = p.a2 === '-' ? ' gap' : '';
+            const bg = p.a2 === '-' ? '' : `background:${divToCss(p.jsd)};color:${textColorForDiv(p.jsd)}`;
+            html += `<span class="aln-cell${cls}" style="${bg}" data-pos="${p.ap}" title="Pos ${p.ap}: cons=${p.a2} WT=${p.w2} JS=${p.jsd}">${p.a2}</span>`;
+        }
+        html += '</div>';
+
+        html += '<div><span class="aln-label"></span>';
+        for (const p of chunk) {
+            let sym = ' ';
+            if (p.a1 === p.a2 && p.a1 !== '-') sym = '|';
+            else if (p.a1 !== '-' && p.a2 !== '-') sym = '.';
+            html += `<span class="aln-cell" style="background:none;color:#aaa;font-size:10px">${sym}</span>`;
+        }
+        html += '</div>';
+        html += '</div>';
+    }
+
+    container.innerHTML = html;
+    container.addEventListener('click', function(e) {
+        const cell = e.target.closest('.aln-cell[data-pos]');
+        if (cell) focusResidue(parseInt(cell.dataset.pos));
+    });
+}
+
+// ===== Table =====
+function renderTable() {
+    const tbody = document.getElementById('div-tbody');
+    let html = '';
+
+    TOP_DIVERGENT.forEach((d, i) => {
+        const resNum = d.r1 !== null ? d.r1 : (d.r2 !== null ? d.r2 : '?');
+        const wtAA = d.w1 !== '-' ? d.w1 : d.w2;
+        const wtMismatch = d.w1 !== '-' && d.w2 !== '-' && d.w1 !== d.w2;
+        const wtLabel = wtMismatch ? `${d.w1}/${d.w2}` : wtAA;
+        const wtStyle = wtMismatch ? 'background:#fff3e0;color:#e65100' : 'background:#f5f5f5';
+        const res1 = d.r1 !== null ? `${d.a1}${d.r1}` : (d.a1 === '-' ? 'gap' : d.a1 + '?');
+        const res2 = d.r2 !== null ? `${d.a2}${d.r2}` : (d.a2 === '-' ? 'gap' : d.a2 + '?');
+        const barW = Math.round(d.jsd * 100);
+        const barColor = divToCss(d.jsd);
+
+        html += `<tr data-pos="${d.ap}">
+            <td>${i + 1}</td>
+            <td>${d.ap}</td>
+            <td><span class="aa-badge" style="${wtStyle}">${wtLabel}${resNum}</span></td>
+            <td><span class="aa-badge" style="background:#e3f2fd">${res1}</span></td>
+            <td><span class="aa-badge" style="background:#fce4ec">${res2}</span></td>
+            <td><span class="aa-badge" style="background:#e8f5e9">${d.t1}</span><span class="freq-small">${(d.f1 * 100).toFixed(0)}%</span></td>
+            <td><span class="aa-badge" style="background:#e8f5e9">${d.t2}</span><span class="freq-small">${(d.f2 * 100).toFixed(0)}%</span></td>
+            <td>
+                <span class="jsd-bar" style="width:${barW}px;background:${barColor}"></span>
+                ${d.jsd.toFixed(3)}
+            </td>
+        </tr>`;
+    });
+    tbody.innerHTML = html;
+
+    tbody.addEventListener('click', function(e) {
+        const row = e.target.closest('tr[data-pos]');
+        if (row) {
+            tbody.querySelectorAll('tr').forEach(r => r.classList.remove('selected'));
+            row.classList.add('selected');
+            focusResidue(parseInt(row.dataset.pos));
+        }
+    });
+}
+
+// ===== Tooltip =====
+const tooltip = document.getElementById('tooltip');
+document.addEventListener('mousemove', function(e) {
+    const cell = e.target.closest('.aln-cell[data-pos]');
+    if (cell) {
+        const pos = parseInt(cell.dataset.pos);
+        const p = POSITIONS.find(d => d.ap === pos);
+        if (p) {
+            const wt = p.w1 !== '-' ? p.w1 : p.w2;
+            const wtNote = (p.w1 !== '-' && p.w2 !== '-' && p.w1 !== p.w2) ? ` (1TNF=${p.w1}, 6OOY=${p.w2})` : '';
+            tooltip.innerHTML = `<b>Position ${pos}</b> &mdash; WT: ${wt}${wtNote}<br>` +
+                `1TNF design: ${p.a1} (top: ${p.t1} ${(p.f1*100).toFixed(0)}%)<br>` +
+                `6OOY design: ${p.a2} (top: ${p.t2} ${(p.f2*100).toFixed(0)}%)<br>` +
+                `JS divergence: <b>${p.jsd.toFixed(4)}</b>`;
+            tooltip.style.display = 'block';
+            tooltip.style.left = (e.clientX + 12) + 'px';
+            tooltip.style.top = (e.clientY + 12) + 'px';
+        }
+    } else {
+        tooltip.style.display = 'none';
+    }
+});
+
+// ===== Residue number mapping between structures =====
+// Both structures are TNF-alpha with the same PDB residue numbering scheme.
+// Map directly by PDB residue number (same number = same residue).
+let resmap1to2 = {};  // 1TNF PDB resnum -> 6OOY PDB resnum
+let resmap2to1 = {};  // 6OOY PDB resnum -> 1TNF PDB resnum
+
+function buildResnumMaps() {
+    const set1 = new Set(CLEANED_RESNUMS_1TNF);
+    const set2 = new Set(CLEANED_RESNUMS_6OOY);
+    for (const r of set1) {
+        if (set2.has(r)) {
+            resmap1to2[r] = r;
+            resmap2to1[r] = r;
+        }
+    }
+}
+
+// ===== Camera sync =====
+// Structures are superposed (same coordinate frame), so we can copy
+// the full camera state (position + target + up) between viewers.
+let cameraSyncPaused = false;
+
+function setupCameraSync() {
+    let syncing = false;
+
+    function syncCamera(srcPlugin, tgtPlugin) {
+        if (syncing || cameraSyncPaused) return;
+        syncing = true;
+        try {
+            const srcSnap = srcPlugin.canvas3d.camera.getSnapshot();
+
+            tgtPlugin.canvas3d.camera.setState({
+                position: new Float64Array(srcSnap.position),
+                target: new Float64Array(srcSnap.target),
+                up: new Float64Array(srcSnap.up),
+            });
+            tgtPlugin.canvas3d.requestDraw();
+        } finally {
+            syncing = false;
+        }
+    }
+
+    // Track which viewer the pointer is over
+    let activePlugin = null;
+    document.getElementById('viewer-1tnf').addEventListener('pointerenter', () => { activePlugin = plugin1; });
+    document.getElementById('viewer-6ooy').addEventListener('pointerenter', () => { activePlugin = plugin2; });
+    document.getElementById('viewer-1tnf').addEventListener('pointerleave', () => { if (activePlugin === plugin1) activePlugin = null; });
+    document.getElementById('viewer-6ooy').addEventListener('pointerleave', () => { if (activePlugin === plugin2) activePlugin = null; });
+
+    plugin1.canvas3d.didDraw.subscribe(() => {
+        if (activePlugin === plugin1) syncCamera(plugin1, plugin2);
+    });
+    plugin2.canvas3d.didDraw.subscribe(() => {
+        if (activePlugin === plugin2) syncCamera(plugin2, plugin1);
+    });
+}
+
+// ===== Focus/selection sync =====
+function setupFocusSync() {
+    let syncingFocus = false;
+
+    // Parse residue number from Mol* focus label like "GLN 67 | B"
+    function getResNumFromLabel(label) {
+        if (!label) return null;
+        const m = label.match(/\b(\d+)\b/);
+        return m ? parseInt(m[1]) : null;
+    }
+
+    // Trigger focus+camera on a single chain's residue in the given viewer
+    function focusAndSelect(plugin, resNum) {
+        const loci = buildResidueLoci(plugin, resNum);
+        if (!loci) return;
+
+        // Pause camera sync so focusLoci on this viewer isn't overridden
+        cameraSyncPaused = true;
+        // setFromLoci triggers the sidechain/nearby-residue display
+        plugin.managers.structure.focus.setFromLoci(loci);
+        // Small delay to let focus representation settle, then zoom camera
+        setTimeout(() => {
+            plugin.managers.camera.focusLoci(loci);
+            // Re-enable camera sync after zoom settles
+            setTimeout(() => { cameraSyncPaused = false; }, 300);
+        }, 50);
+    }
+
+    // When focus changes in viewer 1, mirror to viewer 2
+    plugin1.managers.structure.focus.behaviors.current.subscribe(val => {
+        if (syncingFocus || !val) return;
+        const resNum = getResNumFromLabel(val.label);
+        if (resNum === null) return;
+        const mappedRes = resmap1to2[resNum];
+        if (mappedRes === undefined) return;
+        syncingFocus = true;
+        try { focusAndSelect(plugin2, mappedRes); } finally { syncingFocus = false; }
+    });
+
+    // When focus changes in viewer 2, mirror to viewer 1
+    plugin2.managers.structure.focus.behaviors.current.subscribe(val => {
+        if (syncingFocus || !val) return;
+        const resNum = getResNumFromLabel(val.label);
+        if (resNum === null) return;
+        const mappedRes = resmap2to1[resNum];
+        if (mappedRes === undefined) return;
+        syncingFocus = true;
+        try { focusAndSelect(plugin1, mappedRes); } finally { syncingFocus = false; }
+    });
+}
+
+// ===== Init =====
+async function init() {
+    renderAlignment();
+    await initViewers();
+    buildResnumMaps();
+    setupCameraSync();
+    setupFocusSync();
+    renderTable();
+}
+
+init();
+</script>
+</body>
+</html>
