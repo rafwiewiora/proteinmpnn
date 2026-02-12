@@ -185,6 +185,7 @@ async function initViewers() {
     await loadPdb(v2, pdb2mod, '6OOY');
 
     setupCameraSync();
+    setupFocusSync();
 }
 
 function buildDDMap(positions, rKey) {
@@ -396,6 +397,7 @@ function buildResidueLoci(plugin, resNum, chainId) {
     if (!structs.length) return null;
     const struct = structs[0].cell.obj?.data;
     if (!struct) return null;
+    const matched = [];
     for (const unit of struct.units) {
         if (!unit.conformation) continue;
         const indices = [];
@@ -403,17 +405,19 @@ function buildResidueLoci(plugin, resNum, chainId) {
             const eI = unit.elements[eIdx];
             const rI = unit.residueIndex[eI];
             const rn = unit.model.atomicHierarchy.residues.auth_seq_id.value(rI);
-            const ch = unit.model.atomicHierarchy.chains.auth_asym_id.value(unit.chainIndex[eI]);
-            if (rn === resNum && ch === chainId) {
-                indices.push(eIdx);
+            if (rn !== resNum) continue;
+            if (chainId) {
+                const ch = unit.model.atomicHierarchy.chains.auth_asym_id.value(unit.chainIndex[eI]);
+                if (ch !== chainId) continue;
             }
+            indices.push(eIdx);
         }
         if (indices.length > 0) {
-            return { kind: 'element-loci', structure: struct,
-                     elements: [{ unit, indices: Int32Array.from(indices) }] };
+            matched.push({ unit, indices: Int32Array.from(indices) });
         }
     }
-    return null;
+    if (matched.length === 0) return null;
+    return { kind: 'element-loci', structure: struct, elements: matched };
 }
 
 function focusOnResidue(plugin, resNum, chainId) {
@@ -423,8 +427,11 @@ function focusOnResidue(plugin, resNum, chainId) {
     plugin.managers.camera.focusLoci(loci);
 }
 
+let focusSyncPaused = false;
+
 function focusMutation(row) {
     cameraSyncPaused = true;
+    focusSyncPaused = true;
     if (row.r1 != null && plugin1) focusOnResidue(plugin1, row.r1, row.ch);
     if (row.r2 != null && plugin2) focusOnResidue(plugin2, row.r2, row.ch);
     // After both focus, sync camera from viewer1 to viewer2, then unpause
@@ -434,8 +441,63 @@ function focusMutation(row) {
             plugin2.canvas3d.camera.setState(snap);
             plugin2.canvas3d.requestDraw();
         }
-        setTimeout(() => { cameraSyncPaused = false; }, 200);
+        setTimeout(() => { cameraSyncPaused = false; focusSyncPaused = false; }, 200);
     }, 300);
+}
+
+// ========== Focus sync between viewers ==========
+function setupFocusSync() {
+    let syncingFocus = false;
+
+    // Build resnum maps from POSITIONS data
+    const resmap1to2 = {}, resmap2to1 = {};
+    for (const p of POSITIONS) {
+        if (p.r1 != null && p.r2 != null) {
+            resmap1to2[p.r1] = p.r2;
+            resmap2to1[p.r2] = p.r1;
+        }
+    }
+
+    function getResInfoFromLabel(label) {
+        if (!label) return null;
+        const resMatch = label.match(/\b(\d+)\b/);
+        if (!resMatch) return null;
+        const resNum = parseInt(resMatch[1]);
+        // Try to extract chain from "| A" or ": A" patterns
+        const chainMatch = label.match(/[|:]\s*([A-Z])\b/);
+        return { resNum, chain: chainMatch ? chainMatch[1] : null };
+    }
+
+    function focusAndSelect(plugin, resNum, chainId) {
+        const loci = buildResidueLoci(plugin, resNum, chainId);
+        if (!loci) return;
+        cameraSyncPaused = true;
+        plugin.managers.structure.focus.setFromLoci(loci);
+        setTimeout(() => {
+            plugin.managers.camera.focusLoci(loci);
+            setTimeout(() => { cameraSyncPaused = false; }, 300);
+        }, 50);
+    }
+
+    plugin1.managers.structure.focus.behaviors.current.subscribe(val => {
+        if (syncingFocus || focusSyncPaused || !val) return;
+        const info = getResInfoFromLabel(val.label);
+        if (!info) return;
+        const mapped = resmap1to2[info.resNum];
+        if (mapped === undefined) return;
+        syncingFocus = true;
+        try { focusAndSelect(plugin2, mapped, info.chain); } finally { syncingFocus = false; }
+    });
+
+    plugin2.managers.structure.focus.behaviors.current.subscribe(val => {
+        if (syncingFocus || focusSyncPaused || !val) return;
+        const info = getResInfoFromLabel(val.label);
+        if (!info) return;
+        const mapped = resmap2to1[info.resNum];
+        if (mapped === undefined) return;
+        syncingFocus = true;
+        try { focusAndSelect(plugin1, mapped, info.chain); } finally { syncingFocus = false; }
+    });
 }
 
 // ========== Table ==========
