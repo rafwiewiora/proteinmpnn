@@ -270,7 +270,7 @@ tr.selected { background: #bbdefb !important; }
         <table>
             <thead>
                 <tr>
-                    <th data-col="ap">Pos</th>
+                    <th data-col="r1">Res</th>
                     <th data-col="ch">Chain</th>
                     <th data-col="wt1">WT<sub>1TNF</sub></th>
                     <th data-col="wt2">WT<sub>6OOY</sub></th>
@@ -563,17 +563,23 @@ function buildResidueLoci(plugin, resNum, chainId) {
 function focusOnResidue(plugin, resNum, chainId) {
     const loci = buildResidueLoci(plugin, resNum, chainId);
     if (!loci) return;
-    cameraSyncPaused = true;
     plugin.managers.structure.focus.setFromLoci(loci);
-    setTimeout(() => {
-        plugin.managers.camera.focusLoci(loci);
-        setTimeout(() => { cameraSyncPaused = false; }, 300);
-    }, 50);
+    plugin.managers.camera.focusLoci(loci);
 }
 
 function focusMutation(row) {
+    cameraSyncPaused = true;
     if (row.r1 != null && plugin1) focusOnResidue(plugin1, row.r1, row.ch);
     if (row.r2 != null && plugin2) focusOnResidue(plugin2, row.r2, row.ch);
+    // After both focus, sync camera from viewer1 to viewer2, then unpause
+    setTimeout(() => {
+        if (plugin1 && plugin2) {
+            const snap = plugin1.canvas3d.camera.getSnapshot();
+            plugin2.canvas3d.camera.setState(snap);
+            plugin2.canvas3d.requestDraw();
+        }
+        setTimeout(() => { cameraSyncPaused = false; }, 200);
+    }, 300);
 }
 
 // ========== Table ==========
@@ -589,7 +595,7 @@ function renderTable() {
     let filtered = TABLE_DATA.filter(r => {
         if (sameWt && r.wt1 !== r.wt2) return false;
         if (search) {
-            const s = `${r.ap} ${r.ch} ${r.wt1} ${r.wt2} ${r.mut}`.toLowerCase();
+            const s = `${r.r1 || r.ap} ${r.ch} ${r.wt1} ${r.wt2} ${r.mut}`.toLowerCase();
             if (!s.includes(search)) return false;
         }
         return true;
@@ -610,7 +616,7 @@ function renderTable() {
         const barColor = r.dd > 0 ? '#ef9a9a' : '#90caf9';
         const chainClass = 'chain-' + r.ch;
         return `<tr data-idx="${i}" onclick="onRowClick(${i})" class="${selectedRow===i?'selected':''}">
-            <td>${r.ap}</td>
+            <td>${r.r1 || r.ap}</td>
             <td><span class="chain-tag ${chainClass}">${r.ch}</span></td>
             <td>${r.wt1}</td>
             <td>${r.wt2}</td>
