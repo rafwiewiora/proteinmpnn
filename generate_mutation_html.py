@@ -10,117 +10,33 @@ AA3TO1 = {'ALA':'A','CYS':'C','ASP':'D','GLU':'E','PHE':'F','GLY':'G','HIS':'H',
           'ARG':'R','SER':'S','THR':'T','VAL':'V','TRP':'W','TYR':'Y'}
 
 
-def get_wt_monomer(csv_path):
-    with open(csv_path) as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            if 'cleaned' in row['header']:
-                return row['sequence'].split('/')[0]
-    return None
-
-
-def get_pdb_chain_a(pdb_id):
-    url = f'https://files.rcsb.org/download/{pdb_id}.pdb'
-    resp = urllib.request.urlopen(url)
-    text = resp.read().decode()
-    resnums, seq = [], []
-    seen = set()
-    for line in text.split('\n'):
-        if line.startswith('ATOM') and line[12:16].strip() == 'CA' and line[21] == 'A':
-            rn = int(line[22:26].strip())
-            if rn not in seen:
-                seen.add(rn)
-                resnums.append(rn)
-                seq.append(AA3TO1.get(line[17:20].strip(), 'X'))
-    return resnums, ''.join(seq)
-
-
-def map_cleaned_to_pdb_resnums(cleaned_seq, pdb_resnums, pdb_seq):
-    mapping = []
-    j = 0
-    for i in range(len(pdb_seq)):
-        if j < len(cleaned_seq) and pdb_seq[i] == cleaned_seq[j]:
-            mapping.append(pdb_resnums[i])
-            j += 1
-    assert j == len(cleaned_seq), f'Only matched {j}/{len(cleaned_seq)} residues'
-    return mapping
-
-
-def read_divergence_data(filepath):
-    data = []
-    with open(filepath) as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            data.append(row)
-    data.sort(key=lambda r: int(r['aligned_pos']))
-    return data
-
-
-def compute_position_resnums(div_data, resnums1, resnums2):
-    """For each aligned position, compute PDB resnums for both structures."""
-    idx1, idx2 = 0, 0
-    result = []
-    for row in div_data:
-        has1 = row['aa_1tnf'] != '-'
-        has2 = row['aa_6ooy'] != '-'
-        r1 = resnums1[idx1] if has1 and idx1 < len(resnums1) else None
-        r2 = resnums2[idx2] if has2 and idx2 < len(resnums2) else None
-        if has1: idx1 += 1
-        if has2: idx2 += 1
-        if r1 is not None and r2 is not None:
-            result.append({'ap': int(row['aligned_pos']), 'r1': r1, 'r2': r2})
-    return result
-
-
 def main():
     print('Loading data...')
-    wt1 = get_wt_monomer('/Users/rafal/repos/proteinmpnn/1tnf_results.csv')
-    wt2 = get_wt_monomer('/Users/rafal/repos/proteinmpnn/6ooy_homomer_results.csv')
-
-    print('Fetching PDB structures for residue number mapping...')
-    pdb_resnums_1tnf, pdb_seq_1tnf = get_pdb_chain_a('1TNF')
-    pdb_resnums_6ooy, pdb_seq_6ooy = get_pdb_chain_a('6OOY')
-    resnums1 = map_cleaned_to_pdb_resnums(wt1, pdb_resnums_1tnf, pdb_seq_1tnf)
-    resnums2 = map_cleaned_to_pdb_resnums(wt2, pdb_resnums_6ooy, pdb_seq_6ooy)
-
-    div_data = read_divergence_data('/Users/rafal/repos/proteinmpnn/divergence_analysis.csv')
-    pos_resnums = compute_position_resnums(div_data, resnums1, resnums2)
-
     viz_data = json.load(open('/Users/rafal/repos/proteinmpnn/mutation_viz_data.json'))
 
-    # Merge resnum data into viz_data
-    resnum_map = {p['ap']: p for p in pos_resnums}
-    for v in viz_data:
-        rm = resnum_map.get(v['ap'], {})
-        v['r1'] = rm.get('r1')
-        v['r2'] = rm.get('r2')
-
-    # Read full mutation results for table
+    # Read full mutation results — one row per (pdb_resnum, chain) showing worst mutation
     table_data = []
+    best_by_pos_chain = {}
     with open('/Users/rafal/repos/proteinmpnn/mutation_ddg_scores.csv') as f:
         reader = csv.DictReader(f)
         for row in reader:
-            table_data.append(row)
-    # Sort by abs_dd descending, take top 200
-    table_data.sort(key=lambda r: float(r['abs_dd']), reverse=True)
-    table_rows = []
-    for r in table_data[:200]:
-        ap = int(r['aligned_pos'])
-        rm = resnum_map.get(ap, {})
-        table_rows.append({
-            'ap': ap,
-            'ch': r['chain'],
-            'wt1': r['wt_1tnf'],
-            'wt2': r['wt_6ooy'],
-            'mut': r['mut_aa'],
-            'd1': round(float(r['delta_1tnf']), 2),
-            'd2': round(float(r['delta_6ooy']), 2),
-            'dd': round(float(r['dd_score']), 2),
-            'abs_dd': round(float(r['abs_dd']), 2),
-            'jsd': round(float(r['js_divergence']), 3),
-            'r1': rm.get('r1'),
-            'r2': rm.get('r2'),
-        })
+            rn = int(row['pdb_resnum'])
+            ch = row['chain']
+            abs_dd = float(row['abs_dd'])
+            key = (rn, ch)
+            if key not in best_by_pos_chain or abs_dd > best_by_pos_chain[key]['abs_dd']:
+                best_by_pos_chain[key] = {
+                    'rn': rn,
+                    'ch': ch,
+                    'wt1': row['wt_1tnf'],
+                    'wt2': row['wt_6ooy'],
+                    'mut': row['mut_aa'],
+                    'd1': round(float(row['delta_1tnf']), 2),
+                    'd2': round(float(row['delta_6ooy']), 2),
+                    'dd': round(float(row['dd_score']), 2),
+                    'abs_dd': round(abs_dd, 2),
+                }
+    table_rows = sorted(best_by_pos_chain.values(), key=lambda r: r['abs_dd'], reverse=True)
 
     positions_json = json.dumps(viz_data)
     table_json = json.dumps(table_rows)
@@ -135,11 +51,13 @@ def main():
     html = html.replace('__N_POS__', str(n_positions))
     html = html.replace('__MAX_DD__', f'{max_dd:.1f}')
     html = html.replace('__N_HIGH__', str(n_high))
+    html = html.replace('__N_TABLE__', str(len(table_rows)))
 
     outpath = '/Users/rafal/repos/proteinmpnn/mutation_sensitivity.html'
     with open(outpath, 'w') as f:
         f.write(html)
     print(f'Written to {outpath}')
+    print(f'  {n_positions} positions, {len(table_rows)} table rows ({n_positions}x3 chains)')
 
 
 HTML_TEMPLATE = r"""<!DOCTYPE html>
@@ -235,7 +153,7 @@ tr.selected { background: #bbdefb !important; }
 
 <div class="stats-bar">
     <div class="stat"><span>Shared positions:</span><span class="stat-val">__N_POS__</span></div>
-    <div class="stat"><span>Independent positions (3 chains):</span><span class="stat-val" id="nIndep"></span></div>
+    <div class="stat"><span>Independent positions (3 chains):</span><span class="stat-val">__N_TABLE__</span></div>
     <div class="stat"><span>Max |DD|:</span><span class="stat-val">__MAX_DD__</span></div>
     <div class="stat"><span>Positions with |DD| &gt; 3:</span><span class="stat-val">__N_HIGH__</span></div>
 </div>
@@ -259,18 +177,17 @@ tr.selected { background: #bbdefb !important; }
 </div>
 
 <div class="table-section">
-    <h2>Top Backbone-Sensitive Mutations</h2>
+    <h2>Backbone-Sensitive Mutations (worst per position &times; chain)</h2>
     <div class="controls">
-        <input type="text" id="searchBox" placeholder="Filter by position or AA...">
+        <input type="text" id="searchBox" placeholder="Filter by residue or AA...">
         <label><input type="checkbox" id="sameWtOnly" checked> Same WT only</label>
-        <label><input type="checkbox" id="showAll"> Show all 200</label>
         <span id="rowCount" style="font-size:0.85em;color:#666;"></span>
     </div>
     <div class="table-wrap">
         <table>
             <thead>
                 <tr>
-                    <th data-col="r1">Res</th>
+                    <th data-col="rn">Res</th>
                     <th data-col="ch">Chain</th>
                     <th data-col="wt1">WT<sub>1TNF</sub></th>
                     <th data-col="wt2">WT<sub>6OOY</sub></th>
@@ -280,7 +197,6 @@ tr.selected { background: #bbdefb !important; }
                     <th data-col="dd">DDscore</th>
                     <th data-col="abs_dd">|DD|</th>
                     <th>Bar</th>
-                    <th data-col="jsd">JSD</th>
                 </tr>
             </thead>
             <tbody id="tableBody"></tbody>
@@ -291,7 +207,6 @@ tr.selected { background: #bbdefb !important; }
 <script>
 const POSITIONS = __POSITIONS__;
 const TABLE_DATA = __TABLE_DATA__;
-document.getElementById('nIndep').textContent = POSITIONS.length * 3;
 
 // ========== Mol* viewers ==========
 let plugin1 = null, plugin2 = null;
@@ -315,8 +230,8 @@ async function initViewers() {
     ]);
 
     // Build per-chain resnum -> DD maps
-    const ddMap1 = buildDDMap(POSITIONS, 'r1');
-    const ddMap2 = buildDDMap(POSITIONS, 'r2');
+    const ddMap1 = buildDDMap(POSITIONS, true);
+    const ddMap2 = buildDDMap(POSITIONS, false);
 
     // Replace B-factors with |DD| scores (per chain)
     const pdb1mod = replaceBfactors(pdb1, ddMap1);
@@ -332,16 +247,15 @@ async function initViewers() {
     setupFocusSync();
 }
 
-function buildDDMap(positions, rKey) {
+function buildDDMap(positions, is1tnf) {
     // Returns {chain: {resnum: scaledValue}} for B-factor replacement
-    // We use max|DD| per chain for each position
     // Square-root scaling for better visual contrast
     const maxDD = Math.max(...positions.map(p => p.max_abs_dd || 0));
     const map = {};
     for (const chain of ['A','B','C']) {
         map[chain] = {};
         for (const p of positions) {
-            const rn = p[rKey];
+            const rn = p.rn;
             if (rn == null) continue;
             const dd = p['abs_dd_' + chain] || 0;
             const frac = dd / Math.max(maxDD, 0.01);
@@ -379,11 +293,13 @@ function superposePdb(targetPdb, mobilePdb) {
     const tCAs = getCAcoords(targetPdb);
     const mCAs = getCAcoords(mobilePdb);
     const tCoords = [], mCoords = [];
+    // Use shared PDB resnums from POSITIONS data
     for (const p of POSITIONS) {
-        if (p.r1 == null || p.r2 == null) continue;
-        if (tCAs[p.r1] && mCAs[p.r2]) {
-            tCoords.push(tCAs[p.r1]);
-            mCoords.push(mCAs[p.r2]);
+        const rn = p.rn;
+        if (rn == null) continue;
+        if (tCAs[rn] && mCAs[rn]) {
+            tCoords.push(tCAs[rn]);
+            mCoords.push(mCAs[rn]);
         }
     }
     if (tCoords.length < 3) return mobilePdb;
@@ -508,7 +424,7 @@ async function loadPdb(viewer, pdbData, label) {
     } catch(e) { console.error('Failed to load ' + label + ':', e); }
 }
 
-// ========== Camera sync ==========
+// ========== Camera sync (matches comparison HTML exactly) ==========
 let cameraSyncPaused = false;
 function setupCameraSync() {
     if (!plugin1 || !plugin2) return;
@@ -526,7 +442,11 @@ function setupCameraSync() {
         syncing = true;
         try {
             const snap = src.canvas3d.camera.getSnapshot();
-            tgt.canvas3d.camera.setState(snap);
+            tgt.canvas3d.camera.setState({
+                position: new Float64Array(snap.position),
+                target: new Float64Array(snap.target),
+                up: new Float64Array(snap.up),
+            });
             tgt.canvas3d.requestDraw();
         } finally { syncing = false; }
     }
@@ -536,7 +456,7 @@ function setupCameraSync() {
 }
 
 // ========== Focus on residue ==========
-function buildResidueLoci(plugin, resNum, chainId) {
+function buildResidueLoci(plugin, resNum) {
     const structs = plugin.managers.structure.hierarchy.current.structures;
     if (!structs.length) return null;
     const struct = structs[0].cell.obj?.data;
@@ -549,12 +469,9 @@ function buildResidueLoci(plugin, resNum, chainId) {
             const eI = unit.elements[eIdx];
             const rI = unit.residueIndex[eI];
             const rn = unit.model.atomicHierarchy.residues.auth_seq_id.value(rI);
-            if (rn !== resNum) continue;
-            if (chainId) {
-                const ch = unit.model.atomicHierarchy.chains.auth_asym_id.value(unit.chainIndex[eI]);
-                if (ch !== chainId) continue;
+            if (rn === resNum) {
+                indices.push(eIdx);
             }
-            indices.push(eIdx);
         }
         if (indices.length > 0) {
             matched.push({ unit, indices: Int32Array.from(indices) });
@@ -564,56 +481,21 @@ function buildResidueLoci(plugin, resNum, chainId) {
     return { kind: 'element-loci', structure: struct, elements: matched };
 }
 
-function focusOnResidue(plugin, resNum, chainId) {
-    const loci = buildResidueLoci(plugin, resNum, chainId);
-    if (!loci) return;
-    plugin.managers.structure.focus.setFromLoci(loci);
-    plugin.managers.camera.focusLoci(loci);
-}
-
-let focusSyncPaused = false;
-
-function focusMutation(row) {
-    cameraSyncPaused = true;
-    focusSyncPaused = true;
-    if (row.r1 != null && plugin1) focusOnResidue(plugin1, row.r1, row.ch);
-    if (row.r2 != null && plugin2) focusOnResidue(plugin2, row.r2, row.ch);
-    // After both focus, sync camera from viewer1 to viewer2, then unpause
-    setTimeout(() => {
-        if (plugin1 && plugin2) {
-            const snap = plugin1.canvas3d.camera.getSnapshot();
-            plugin2.canvas3d.camera.setState(snap);
-            plugin2.canvas3d.requestDraw();
-        }
-        setTimeout(() => { cameraSyncPaused = false; focusSyncPaused = false; }, 200);
-    }, 300);
-}
-
-// ========== Focus sync between viewers ==========
+// ========== Focus sync (matches comparison HTML pattern) ==========
 function setupFocusSync() {
     let syncingFocus = false;
 
-    // Build resnum maps from POSITIONS data
-    const resmap1to2 = {}, resmap2to1 = {};
-    for (const p of POSITIONS) {
-        if (p.r1 != null && p.r2 != null) {
-            resmap1to2[p.r1] = p.r2;
-            resmap2to1[p.r2] = p.r1;
-        }
-    }
+    // Both structures share the same PDB resnums at shared positions
+    const sharedResnums = new Set(POSITIONS.map(p => p.rn));
 
-    function getResInfoFromLabel(label) {
+    function getResNumFromLabel(label) {
         if (!label) return null;
-        const resMatch = label.match(/\b(\d+)\b/);
-        if (!resMatch) return null;
-        const resNum = parseInt(resMatch[1]);
-        // Try to extract chain from "| A" or ": A" patterns
-        const chainMatch = label.match(/[|:]\s*([A-Z])\b/);
-        return { resNum, chain: chainMatch ? chainMatch[1] : null };
+        const m = label.match(/\b(\d+)\b/);
+        return m ? parseInt(m[1]) : null;
     }
 
-    function focusAndSelect(plugin, resNum, chainId) {
-        const loci = buildResidueLoci(plugin, resNum, chainId);
+    function focusAndSelect(plugin, resNum) {
+        const loci = buildResidueLoci(plugin, resNum);
         if (!loci) return;
         cameraSyncPaused = true;
         plugin.managers.structure.focus.setFromLoci(loci);
@@ -624,24 +506,53 @@ function setupFocusSync() {
     }
 
     plugin1.managers.structure.focus.behaviors.current.subscribe(val => {
-        if (syncingFocus || focusSyncPaused || !val) return;
-        const info = getResInfoFromLabel(val.label);
-        if (!info) return;
-        const mapped = resmap1to2[info.resNum];
-        if (mapped === undefined) return;
+        if (syncingFocus || !val) return;
+        const resNum = getResNumFromLabel(val.label);
+        if (resNum === null || !sharedResnums.has(resNum)) return;
         syncingFocus = true;
-        try { focusAndSelect(plugin2, mapped, info.chain); } finally { syncingFocus = false; }
+        try { focusAndSelect(plugin2, resNum); } finally { syncingFocus = false; }
     });
 
     plugin2.managers.structure.focus.behaviors.current.subscribe(val => {
-        if (syncingFocus || focusSyncPaused || !val) return;
-        const info = getResInfoFromLabel(val.label);
-        if (!info) return;
-        const mapped = resmap2to1[info.resNum];
-        if (mapped === undefined) return;
+        if (syncingFocus || !val) return;
+        const resNum = getResNumFromLabel(val.label);
+        if (resNum === null || !sharedResnums.has(resNum)) return;
         syncingFocus = true;
-        try { focusAndSelect(plugin1, mapped, info.chain); } finally { syncingFocus = false; }
+        try { focusAndSelect(plugin1, resNum); } finally { syncingFocus = false; }
     });
+}
+
+// ========== Focus from table click ==========
+function focusMutation(row) {
+    cameraSyncPaused = true;
+    const rn = row.rn;
+    if (rn != null && plugin1) {
+        const loci1 = buildResidueLoci(plugin1, rn);
+        if (loci1) {
+            plugin1.managers.structure.focus.setFromLoci(loci1);
+            plugin1.managers.camera.focusLoci(loci1);
+        }
+    }
+    if (rn != null && plugin2) {
+        const loci2 = buildResidueLoci(plugin2, rn);
+        if (loci2) {
+            plugin2.managers.structure.focus.setFromLoci(loci2);
+            plugin2.managers.camera.focusLoci(loci2);
+        }
+    }
+    // Sync cameras after focus settles
+    setTimeout(() => {
+        if (plugin1 && plugin2) {
+            const snap = plugin1.canvas3d.camera.getSnapshot();
+            plugin2.canvas3d.camera.setState({
+                position: new Float64Array(snap.position),
+                target: new Float64Array(snap.target),
+                up: new Float64Array(snap.up),
+            });
+            plugin2.canvas3d.requestDraw();
+        }
+        setTimeout(() => { cameraSyncPaused = false; }, 200);
+    }, 300);
 }
 
 // ========== Table ==========
@@ -651,13 +562,12 @@ let selectedRow = null;
 function renderTable() {
     const search = document.getElementById('searchBox').value.toLowerCase();
     const sameWt = document.getElementById('sameWtOnly').checked;
-    const showAll = document.getElementById('showAll').checked;
     const maxDD = Math.max(...TABLE_DATA.map(r => r.abs_dd));
 
     let filtered = TABLE_DATA.filter(r => {
         if (sameWt && r.wt1 !== r.wt2) return false;
         if (search) {
-            const s = `${r.r1 || r.ap} ${r.ch} ${r.wt1} ${r.wt2} ${r.mut}`.toLowerCase();
+            const s = `${r.rn} ${r.ch} ${r.wt1} ${r.wt2} ${r.mut}`.toLowerCase();
             if (!s.includes(search)) return false;
         }
         return true;
@@ -669,8 +579,6 @@ function renderTable() {
         return sortAsc ? va - vb : vb - va;
     });
 
-    if (!showAll) filtered = filtered.slice(0, 50);
-
     const tbody = document.getElementById('tableBody');
     tbody.innerHTML = filtered.map((r, i) => {
         const ddClass = r.dd > 0 ? 'dd-pos' : 'dd-neg';
@@ -678,7 +586,7 @@ function renderTable() {
         const barColor = r.dd > 0 ? '#ef9a9a' : '#90caf9';
         const chainClass = 'chain-' + r.ch;
         return `<tr data-idx="${i}" onclick="onRowClick(${i})" class="${selectedRow===i?'selected':''}">
-            <td>${r.r1 || r.ap}</td>
+            <td>${r.rn}</td>
             <td><span class="chain-tag ${chainClass}">${r.ch}</span></td>
             <td>${r.wt1}</td>
             <td>${r.wt2}</td>
@@ -688,12 +596,10 @@ function renderTable() {
             <td class="${ddClass}">${r.dd > 0 ? '+' : ''}${r.dd.toFixed(2)}</td>
             <td>${r.abs_dd.toFixed(2)}</td>
             <td><div class="dd-bar" style="width:${barWidth}px;background:${barColor}"></div></td>
-            <td>${r.jsd.toFixed(3)}</td>
         </tr>`;
     }).join('');
 
-    document.getElementById('rowCount').textContent = `Showing ${filtered.length} mutations`;
-    // Store filtered for click handler
+    document.getElementById('rowCount').textContent = `Showing ${filtered.length} of ${TABLE_DATA.length}`;
     window._filteredData = filtered;
 }
 
@@ -716,7 +622,6 @@ document.querySelectorAll('th[data-col]').forEach(th => {
 
 document.getElementById('searchBox').addEventListener('input', () => { selectedRow = null; renderTable(); });
 document.getElementById('sameWtOnly').addEventListener('change', () => { selectedRow = null; renderTable(); });
-document.getElementById('showAll').addEventListener('change', renderTable);
 
 // ========== Init ==========
 renderTable();

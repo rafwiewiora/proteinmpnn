@@ -4,15 +4,14 @@
 Uses conditional_probs_only mode to efficiently compute P(aa_i | backbone, WT_context)
 for all 21 amino acids at every position in a single model pass per backbone.
 
-Every position across all 3 chains is treated independently (as if a single-chain
-construct with linkers). DDscore computed for each chain×position×mutation.
+Position matching is done via PDB residue numbers: we find the set of PDB resnums
+present in both RCSB structures and map them to ProteinMPNN monomer indices.
 
 Usage:
     /Users/rafal/miniconda3/envs/mpnn/bin/python score_mutants.py
 """
 
 import os
-import sys
 import csv
 import json
 import subprocess
@@ -26,6 +25,10 @@ PYTHON = '/Users/rafal/miniconda3/envs/mpnn/bin/python'
 ALPHABET = 'ACDEFGHIKLMNPQRSTVWYX'
 AA20 = list('ACDEFGHIKLMNPQRSTVWY')  # 20 standard AAs (no X)
 AA_TO_IDX = {aa: i for i, aa in enumerate(ALPHABET)}
+AA3TO1 = {'ALA': 'A', 'CYS': 'C', 'ASP': 'D', 'GLU': 'E', 'PHE': 'F',
+          'GLY': 'G', 'HIS': 'H', 'ILE': 'I', 'LYS': 'K', 'LEU': 'L',
+          'MET': 'M', 'ASN': 'N', 'PRO': 'P', 'GLN': 'Q', 'ARG': 'R',
+          'SER': 'S', 'THR': 'T', 'VAL': 'V', 'TRP': 'W', 'TYR': 'Y'}
 
 
 def download_pdb(pdb_id):
@@ -120,47 +123,69 @@ def build_chain_map(full_seq, wt_monomer):
     return chain_len, positions
 
 
-def load_divergence_data():
-    csv_path = os.path.join(WORK_DIR, 'divergence_analysis.csv')
-    data = []
-    with open(csv_path) as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            data.append(row)
-    data.sort(key=lambda r: int(r['aligned_pos']))
-    return data
+def get_pdb_chain_a_resnums(pdb_id):
+    """Get CA resnums and 1-letter AAs for chain A from RCSB PDB."""
+    url = f'https://files.rcsb.org/download/{pdb_id}.pdb'
+    text = urllib.request.urlopen(url).read().decode()
+    resnums, seq = [], []
+    seen = set()
+    for line in text.split('\n'):
+        if line.startswith('ATOM') and line[12:16].strip() == 'CA' and line[21] == 'A':
+            rn = int(line[22:26].strip())
+            if rn not in seen:
+                seen.add(rn)
+                resnums.append(rn)
+                seq.append(AA3TO1.get(line[17:20].strip(), 'X'))
+    return resnums, ''.join(seq)
 
 
-def build_shared_positions(div_data, wt_1tnf, wt_6ooy):
-    """Build list of shared aligned positions with monomer indices."""
-    idx_1tnf = 0
-    idx_6ooy = 0
+def map_monomer_to_pdb_resnums(monomer_seq, pdb_resnums, pdb_seq):
+    """Greedy match of MPNN monomer sequence to RCSB PDB resnums.
+    Returns list of PDB resnums, one per monomer position."""
+    mapping = []
+    j = 0
+    for i in range(len(pdb_seq)):
+        if j < len(monomer_seq) and pdb_seq[i] == monomer_seq[j]:
+            mapping.append(pdb_resnums[i])
+            j += 1
+    assert j == len(monomer_seq), f'Only matched {j}/{len(monomer_seq)} residues'
+    return mapping
+
+
+def build_shared_positions_by_resnum(wt_1tnf, wt_6ooy, resnums_1tnf, resnums_6ooy):
+    """Build shared positions using PDB residue number matching.
+
+    Returns list of dicts with pdb_resnum, mono_idx for each structure, and WT AAs.
+    """
+    # Build mono_idx -> pdb_resnum maps
+    mono_to_rn_1 = {i: rn for i, rn in enumerate(resnums_1tnf)}
+    mono_to_rn_2 = {i: rn for i, rn in enumerate(resnums_6ooy)}
+
+    # Build pdb_resnum -> mono_idx maps
+    rn_to_mono_1 = {rn: i for i, rn in enumerate(resnums_1tnf)}
+    rn_to_mono_2 = {rn: i for i, rn in enumerate(resnums_6ooy)}
+
+    # Find shared PDB resnums (present in both MPNN monomers)
+    shared_rn = sorted(set(resnums_1tnf) & set(resnums_6ooy))
+
     shared = []
-    for row in div_data:
-        has_1tnf = row['aa_1tnf'] != '-'
-        has_6ooy = row['aa_6ooy'] != '-'
-        mi1 = idx_1tnf if has_1tnf else None
-        mi2 = idx_6ooy if has_6ooy else None
-        if has_1tnf:
-            idx_1tnf += 1
-        if has_6ooy:
-            idx_6ooy += 1
-        if mi1 is not None and mi2 is not None:
-            shared.append({
-                'aligned_pos': int(row['aligned_pos']),
-                'mono_idx_1tnf': mi1,
-                'mono_idx_6ooy': mi2,
-                'wt_1tnf': wt_1tnf[mi1],
-                'wt_6ooy': wt_6ooy[mi2],
-                'js_divergence': float(row['js_divergence']),
-            })
+    for rn in shared_rn:
+        mi1 = rn_to_mono_1[rn]
+        mi2 = rn_to_mono_2[rn]
+        shared.append({
+            'pdb_resnum': rn,
+            'mono_idx_1tnf': mi1,
+            'mono_idx_6ooy': mi2,
+            'wt_1tnf': wt_1tnf[mi1],
+            'wt_6ooy': wt_6ooy[mi2],
+        })
     return shared
 
 
 def main():
     print('=' * 60)
     print('Single-Point Mutant Scoring: 1TNF vs 6OOY')
-    print('(All positions independent, no chain averaging)')
+    print('(PDB resnum-matched, all chains independent)')
     print('=' * 60)
 
     # Step 1: PDB files
@@ -190,8 +215,8 @@ def main():
     S_1tnf = data_1tnf['S']
     S_6ooy = data_6ooy['S']
 
-    print(f'  1TNF: {logp_1tnf.shape}')
-    print(f'  6OOY: {logp_6ooy.shape}')
+    print(f'  1TNF log_p shape: {data_1tnf["log_p"].shape} -> averaged {logp_1tnf.shape}')
+    print(f'  6OOY log_p shape: {data_6ooy["log_p"].shape} -> averaged {logp_6ooy.shape}')
 
     # Step 4: Build chain mappings
     print('\n[4/6] Building chain mappings...')
@@ -206,11 +231,25 @@ def main():
     map1 = {mi: tis for mi, tis in positions_1tnf}
     map2 = {mi: tis for mi, tis in positions_6ooy}
 
-    # Step 5: Build alignment and score mutations
-    print('\n[5/6] Building alignment and scoring...')
-    div_data = load_divergence_data()
-    shared = build_shared_positions(div_data, wt_1tnf, wt_6ooy)
-    print(f'  {len(shared)} shared aligned positions × 3 chains = {len(shared)*3} independent positions')
+    # Step 5: Build PDB resnum-matched positions and score mutations
+    print('\n[5/6] Building PDB resnum-matched positions and scoring...')
+    print('  Fetching RCSB PDB structures for residue number mapping...')
+    pdb_rn_1tnf, pdb_seq_1tnf = get_pdb_chain_a_resnums('1TNF')
+    pdb_rn_6ooy, pdb_seq_6ooy = get_pdb_chain_a_resnums('6OOY')
+    print(f'  1TNF PDB chain A: {len(pdb_rn_1tnf)} residues (resnums {pdb_rn_1tnf[0]}-{pdb_rn_1tnf[-1]})')
+    print(f'  6OOY PDB chain A: {len(pdb_rn_6ooy)} residues (resnums {pdb_rn_6ooy[0]}-{pdb_rn_6ooy[-1]})')
+
+    resnums_1tnf = map_monomer_to_pdb_resnums(wt_1tnf, pdb_rn_1tnf, pdb_seq_1tnf)
+    resnums_6ooy = map_monomer_to_pdb_resnums(wt_6ooy, pdb_rn_6ooy, pdb_seq_6ooy)
+    print(f'  1TNF monomer -> PDB resnums: {resnums_1tnf[0]}-{resnums_1tnf[-1]}')
+    print(f'  6OOY monomer -> PDB resnums: {resnums_6ooy[0]}-{resnums_6ooy[-1]}')
+
+    shared = build_shared_positions_by_resnum(wt_1tnf, wt_6ooy, resnums_1tnf, resnums_6ooy)
+    n_same_wt = sum(1 for s in shared if s['wt_1tnf'] == s['wt_6ooy'])
+    print(f'  {len(shared)} shared PDB resnums, {n_same_wt} with identical WT, {len(shared)-n_same_wt} with WT mismatch')
+    for s in shared:
+        if s['wt_1tnf'] != s['wt_6ooy']:
+            print(f'    PDB resnum {s["pdb_resnum"]}: 1TNF={s["wt_1tnf"]}, 6OOY={s["wt_6ooy"]}')
 
     chain_labels = ['A', 'B', 'C']
     results = []
@@ -238,7 +277,7 @@ def main():
                 dd = d1 - d2
 
                 results.append({
-                    'aligned_pos': sp['aligned_pos'],
+                    'pdb_resnum': sp['pdb_resnum'],
                     'chain': chain,
                     'wt_1tnf': wt1,
                     'wt_6ooy': wt2,
@@ -248,7 +287,6 @@ def main():
                     'dd_score': round(dd, 4),
                     'abs_dd': round(abs(dd), 4),
                     'wt_same': wt1 == wt2,
-                    'js_divergence': sp['js_divergence'],
                 })
 
     results.sort(key=lambda r: r['abs_dd'], reverse=True)
@@ -259,35 +297,33 @@ def main():
         writer = csv.DictWriter(f, fieldnames=list(results[0].keys()))
         writer.writeheader()
         writer.writerows(results)
-    print(f'  Full results: {out_path} ({len(results)} rows)')
+    print(f'\n  Full results: {out_path} ({len(results)} rows)')
 
     # Build per-position summary (max |DD| across all mutations, per chain)
     pos_summary = {}
     for r in results:
-        key = (r['aligned_pos'], r['chain'])
+        key = (r['pdb_resnum'], r['chain'])
         if key not in pos_summary or r['abs_dd'] > pos_summary[key]['abs_dd']:
             pos_summary[key] = r
 
-    # Build per-position summary across all chains (max |DD| at each aligned pos)
+    # Build per-position summary across all chains (max |DD| at each position)
     pos_max = {}
     for r in results:
-        ap = r['aligned_pos']
-        if ap not in pos_max or r['abs_dd'] > pos_max[ap]['abs_dd']:
-            pos_max[ap] = r
+        rn = r['pdb_resnum']
+        if rn not in pos_max or r['abs_dd'] > pos_max[rn]['abs_dd']:
+            pos_max[rn] = r
 
     # Write JSON for visualization
-    # Per-position data: for each aligned pos, max |DD| and best mutation per chain
     viz_data = []
     for sp in shared:
-        ap = sp['aligned_pos']
+        rn = sp['pdb_resnum']
         entry = {
-            'ap': ap,
+            'rn': rn,
             'wt1': sp['wt_1tnf'],
             'wt2': sp['wt_6ooy'],
-            'jsd': sp['js_divergence'],
         }
         for chain in chain_labels:
-            key = (ap, chain)
+            key = (rn, chain)
             if key in pos_summary:
                 r = pos_summary[key]
                 entry[f'dd_{chain}'] = r['dd_score']
@@ -295,11 +331,11 @@ def main():
                 entry[f'mut_{chain}'] = r['mut_aa']
                 entry[f'd1_{chain}'] = r['delta_1tnf']
                 entry[f'd2_{chain}'] = r['delta_6ooy']
-        if ap in pos_max:
-            entry['max_abs_dd'] = pos_max[ap]['abs_dd']
-            entry['max_dd'] = pos_max[ap]['dd_score']
-            entry['max_mut'] = pos_max[ap]['mut_aa']
-            entry['max_chain'] = pos_max[ap]['chain']
+        if rn in pos_max:
+            entry['max_abs_dd'] = pos_max[rn]['abs_dd']
+            entry['max_dd'] = pos_max[rn]['dd_score']
+            entry['max_mut'] = pos_max[rn]['mut_aa']
+            entry['max_chain'] = pos_max[rn]['chain']
         viz_data.append(entry)
 
     viz_path = os.path.join(WORK_DIR, 'mutation_viz_data.json')
@@ -307,80 +343,32 @@ def main():
         json.dump(viz_data, f)
     print(f'  Viz data: {viz_path}')
 
-    # Also save full per-position per-mutation data for heatmap
-    heatmap_data = {}
-    for r in results:
-        ap = r['aligned_pos']
-        chain = r['chain']
-        if ap not in heatmap_data:
-            heatmap_data[ap] = {'wt1': r['wt_1tnf'], 'wt2': r['wt_6ooy'], 'jsd': r['js_divergence'], 'muts': {}}
-        key = f"{chain}_{r['mut_aa']}"
-        heatmap_data[ap]['muts'][key] = {
-            'd1': r['delta_1tnf'],
-            'd2': r['delta_6ooy'],
-            'dd': r['dd_score'],
-        }
-
-    heatmap_path = os.path.join(WORK_DIR, 'mutation_heatmap_data.json')
-    with open(heatmap_path, 'w') as f:
-        json.dump(heatmap_data, f)
-    print(f'  Heatmap data: {heatmap_path}')
-
-    # Print top 20
+    # Step 6: Print summary
     print(f'\n{"=" * 75}')
     print(f'TOP 20 MUTATIONS BY |DDscore|')
     print(f'{"=" * 75}')
-    print(f'{"Pos":>4} {"Ch":>2} {"WT1":>3} {"WT2":>3} {"Mut":>3} '
-          f'{"D_1TNF":>8} {"D_6OOY":>8} {"DD":>8} {"JSD":>6}')
-    print('-' * 75)
+    print(f'{"Res":>4} {"Ch":>2} {"WT1":>3} {"WT2":>3} {"Mut":>3} '
+          f'{"D_1TNF":>8} {"D_6OOY":>8} {"DD":>8}')
+    print('-' * 55)
     for r in results[:20]:
-        print(f'{r["aligned_pos"]:>4} {r["chain"]:>2} {r["wt_1tnf"]:>3} {r["wt_6ooy"]:>3} {r["mut_aa"]:>3} '
+        note = '' if r['wt_same'] else '  WT-diff'
+        print(f'{r["pdb_resnum"]:>4} {r["chain"]:>2} {r["wt_1tnf"]:>3} {r["wt_6ooy"]:>3} {r["mut_aa"]:>3} '
               f'{r["delta_1tnf"]:>8.3f} {r["delta_6ooy"]:>8.3f} '
-              f'{r["dd_score"]:>8.3f} {r["js_divergence"]:>6.3f}')
+              f'{r["dd_score"]:>8.3f}{note}')
 
-    # Position-level summary
     pos_ranked = sorted(pos_max.values(), key=lambda r: r['abs_dd'], reverse=True)
     same_wt = [r for r in pos_ranked if r['wt_same']]
 
     print(f'\n{"=" * 75}')
     print(f'TOP 20 POSITIONS BY MAX |DDscore| (same WT only)')
     print(f'{"=" * 75}')
-    print(f'{"Pos":>4} {"Ch":>2} {"WT":>3} {"Mut":>3} '
-          f'{"D_1TNF":>8} {"D_6OOY":>8} {"DD":>8} {"JSD":>6}')
-    print('-' * 60)
+    print(f'{"Res":>4} {"Ch":>2} {"WT":>3} {"Mut":>3} '
+          f'{"D_1TNF":>8} {"D_6OOY":>8} {"DD":>8}')
+    print('-' * 55)
     for r in same_wt[:20]:
-        print(f'{r["aligned_pos"]:>4} {r["chain"]:>2} {r["wt_1tnf"]:>3} {r["mut_aa"]:>3} '
+        print(f'{r["pdb_resnum"]:>4} {r["chain"]:>2} {r["wt_1tnf"]:>3} {r["mut_aa"]:>3} '
               f'{r["delta_1tnf"]:>8.3f} {r["delta_6ooy"]:>8.3f} '
-              f'{r["dd_score"]:>8.3f} {r["js_divergence"]:>6.3f}')
-
-    # Chain asymmetry check
-    print(f'\n{"=" * 75}')
-    print('CHAIN ASYMMETRY CHECK (how different are A/B/C at same position)')
-    print(f'{"=" * 75}')
-    asym_scores = []
-    for sp in shared:
-        ap = sp['aligned_pos']
-        for mut_aa in AA20:
-            if mut_aa == sp['wt_1tnf'] and mut_aa == sp['wt_6ooy']:
-                continue
-            dds = []
-            for chain in chain_labels:
-                key = (ap, chain)
-                # Find this specific mutation
-                for r in results:
-                    if r['aligned_pos'] == ap and r['chain'] == chain and r['mut_aa'] == mut_aa:
-                        dds.append(r['dd_score'])
-                        break
-            if len(dds) == 3:
-                spread = max(dds) - min(dds)
-                if spread > 2.0:
-                    asym_scores.append((ap, mut_aa, dds, spread))
-
-    asym_scores.sort(key=lambda x: x[3], reverse=True)
-    print(f'Positions with chain DD spread > 2.0: {len(asym_scores)}')
-    print(f'{"Pos":>4} {"Mut":>3} {"DD_A":>8} {"DD_B":>8} {"DD_C":>8} {"Spread":>8}')
-    for ap, mut, dds, spread in asym_scores[:10]:
-        print(f'{ap:>4} {mut:>3} {dds[0]:>8.3f} {dds[1]:>8.3f} {dds[2]:>8.3f} {spread:>8.3f}')
+              f'{r["dd_score"]:>8.3f}')
 
 
 if __name__ == '__main__':

@@ -5,125 +5,52 @@ Creates an HTML file with:
 - Side-by-side Mol* viewers colored by JS-divergence (B-factor replacement + uncertainty theme)
 - Aligned consensus sequences with color-coded positions
 - Table of top divergent positions (clickable to focus viewers)
+
+Uses PDB resnum-based position matching (from analyze_results.py).
 """
 
 import csv
 import json
-import urllib.request
-
-AA3TO1 = {'ALA':'A','CYS':'C','ASP':'D','GLU':'E','PHE':'F','GLY':'G','HIS':'H',
-          'ILE':'I','LYS':'K','LEU':'L','MET':'M','ASN':'N','PRO':'P','GLN':'Q',
-          'ARG':'R','SER':'S','THR':'T','VAL':'V','TRP':'W','TYR':'Y'}
-
-
-def get_wt_monomer(csv_path):
-    """Extract the WT (cleaned) monomer sequence from a ProteinMPNN results CSV."""
-    with open(csv_path) as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            if 'cleaned' in row['header']:
-                return row['sequence'].split('/')[0]
-    return None
-
-
-def get_pdb_chain_a(pdb_id):
-    """Fetch PDB and extract chain A residue numbers and 1-letter sequence."""
-    url = f'https://files.rcsb.org/download/{pdb_id}.pdb'
-    resp = urllib.request.urlopen(url)
-    text = resp.read().decode()
-    resnums, seq = [], []
-    seen = set()
-    for line in text.split('\n'):
-        if line.startswith('ATOM') and line[12:16].strip() == 'CA' and line[21] == 'A':
-            rn = int(line[22:26].strip())
-            if rn not in seen:
-                seen.add(rn)
-                resnums.append(rn)
-                seq.append(AA3TO1.get(line[17:20].strip(), 'X'))
-    return resnums, ''.join(seq)
-
-
-def map_cleaned_to_pdb_resnums(cleaned_seq, pdb_resnums, pdb_seq):
-    """Map each position in ProteinMPNN's cleaned sequence to its PDB residue number.
-
-    The cleaned sequence is a subsequence of the PDB sequence (ProteinMPNN removes
-    residues with incomplete backbone atoms). This finds the correct mapping by
-    matching characters in order.
-    """
-    mapping = []
-    j = 0
-    for i in range(len(pdb_seq)):
-        if j < len(cleaned_seq) and pdb_seq[i] == cleaned_seq[j]:
-            mapping.append(pdb_resnums[i])
-            j += 1
-    assert j == len(cleaned_seq), f'Only matched {j}/{len(cleaned_seq)} residues'
-    return mapping
 
 
 def read_data(filepath):
-    """Read divergence analysis CSV and return sorted list of dicts."""
+    """Read divergence analysis CSV (PDB resnum-based) and return sorted list of dicts."""
     data = []
     with open(filepath) as f:
         reader = csv.DictReader(f)
         for row in reader:
             data.append({
-                'aligned_pos': int(row['aligned_pos']),
-                'aa_1tnf': row['aa_1tnf'],
-                'aa_6ooy': row['aa_6ooy'],
+                'pdb_resnum': int(row['pdb_resnum']),
+                'wt_1tnf': row['wt_1tnf'],
+                'wt_6ooy': row['wt_6ooy'],
+                'cons_1tnf': row['cons_1tnf'],
+                'cons_6ooy': row['cons_6ooy'],
                 'top_aa_1tnf': row['top_aa_1tnf'],
                 'freq_1tnf': float(row['freq_1tnf']),
                 'top_aa_6ooy': row['top_aa_6ooy'],
                 'freq_6ooy': float(row['freq_6ooy']),
                 'js_divergence': float(row['js_divergence']),
+                'in_both': row['in_both'] == 'True',
             })
-    data.sort(key=lambda x: x['aligned_pos'])
+    data.sort(key=lambda x: x['pdb_resnum'])
     return data
 
 
-def compute_mappings(data, wt1_seq, wt2_seq, resnums1, resnums2):
-    """Add monomer index, WT residue, and PDB resnum fields to each row."""
-    idx_1tnf = 0
-    idx_6ooy = 0
-    for row in data:
-        if row['aa_1tnf'] != '-':
-            row['mono_idx_1tnf'] = idx_1tnf
-            row['wt_1tnf'] = wt1_seq[idx_1tnf] if idx_1tnf < len(wt1_seq) else '?'
-            row['pdb_resnum_1tnf'] = resnums1[idx_1tnf] if idx_1tnf < len(resnums1) else None
-            idx_1tnf += 1
-        else:
-            row['mono_idx_1tnf'] = None
-            row['wt_1tnf'] = '-'
-            row['pdb_resnum_1tnf'] = None
-        if row['aa_6ooy'] != '-':
-            row['mono_idx_6ooy'] = idx_6ooy
-            row['wt_6ooy'] = wt2_seq[idx_6ooy] if idx_6ooy < len(wt2_seq) else '?'
-            row['pdb_resnum_6ooy'] = resnums2[idx_6ooy] if idx_6ooy < len(resnums2) else None
-            idx_6ooy += 1
-        else:
-            row['mono_idx_6ooy'] = None
-            row['wt_6ooy'] = '-'
-            row['pdb_resnum_6ooy'] = None
-    return idx_1tnf, idx_6ooy
-
-
-def generate_html(data, n_res_1tnf, n_res_6ooy):
+def generate_html(data):
     """Generate the complete HTML string with Mol* viewers."""
     def _row(d):
         return {
-            'ap': d['aligned_pos'],
-            'a1': d['aa_1tnf'],
-            'a2': d['aa_6ooy'],
+            'rn': d['pdb_resnum'],
+            'w1': d['wt_1tnf'],
+            'w2': d['wt_6ooy'],
+            'c1': d['cons_1tnf'],
+            'c2': d['cons_6ooy'],
             't1': d['top_aa_1tnf'],
             'f1': round(d['freq_1tnf'], 3),
             't2': d['top_aa_6ooy'],
             'f2': round(d['freq_6ooy'], 3),
             'jsd': round(d['js_divergence'], 4),
-            'mi1': d['mono_idx_1tnf'],
-            'mi2': d['mono_idx_6ooy'],
-            'w1': d['wt_1tnf'],
-            'w2': d['wt_6ooy'],
-            'r1': d['pdb_resnum_1tnf'],
-            'r2': d['pdb_resnum_6ooy'],
+            'ib': d['in_both'],
         }
 
     positions_json = json.dumps([_row(d) for d in data])
@@ -131,14 +58,18 @@ def generate_html(data, n_res_1tnf, n_res_6ooy):
     top_divergent = sorted(data, key=lambda x: x['js_divergence'], reverse=True)[:20]
     top_json = json.dumps([_row(d) for d in top_divergent])
 
-    js_values = [d['js_divergence'] for d in data]
+    # Stats for shared positions only
+    shared = [d for d in data if d['in_both']]
+    js_values = [d['js_divergence'] for d in shared]
     mean_js = sum(js_values) / len(js_values)
     max_js = max(js_values)
     n_high = sum(1 for v in js_values if v > 0.5)
-    n_aligned = len(data)
 
-    # Use a raw string approach to avoid f-string brace issues with JS
-    # We'll use placeholder tokens and replace them
+    n_total = len(data)
+    n_shared = len(shared)
+    n_only_1tnf = sum(1 for d in data if d['wt_1tnf'] != '-' and d['wt_6ooy'] == '-')
+    n_only_6ooy = sum(1 for d in data if d['wt_6ooy'] != '-' and d['wt_1tnf'] == '-')
+
     html_template = r"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -183,7 +114,6 @@ header p { font-size: 14px; opacity: 0.8; }
 }
 .viewer-header .pdb-id { color: #1565c0; }
 
-/* Mol* viewer container - needs position:relative and fixed height */
 .viewer-box {
     width: 100%; height: 520px; position: relative;
 }
@@ -197,7 +127,6 @@ header p { font-size: 14px; opacity: 0.8; }
     border: 1px solid #ccc;
 }
 .legend-gradient-uncertainty {
-    /* Mol* uncertainty theme: blue → cyan → green → yellow → orange */
     background: linear-gradient(to right, #3d3dff, #30d5c8, #7cfc00, #ffd700, #ff8c00);
 }
 
@@ -271,10 +200,10 @@ footer {
 </header>
 
 <div class="stats-bar">
-    <div class="stat"><span class="stat-label">Aligned positions:</span><span class="stat-value">__N_ALIGNED__</span></div>
-    <div class="stat"><span class="stat-label">1TNF residues:</span><span class="stat-value">__N_RES_1TNF__</span></div>
-    <div class="stat"><span class="stat-label">6OOY residues:</span><span class="stat-value">__N_RES_6OOY__</span></div>
-    <div class="stat"><span class="stat-label">Mean JS-div:</span><span class="stat-value">__MEAN_JS__</span></div>
+    <div class="stat"><span class="stat-label">Shared positions:</span><span class="stat-value">__N_SHARED__</span></div>
+    <div class="stat"><span class="stat-label">Only in 1TNF:</span><span class="stat-value">__N_ONLY_1TNF__</span></div>
+    <div class="stat"><span class="stat-label">Only in 6OOY:</span><span class="stat-value">__N_ONLY_6OOY__</span></div>
+    <div class="stat"><span class="stat-label">Mean JS-div (shared):</span><span class="stat-value">__MEAN_JS__</span></div>
     <div class="stat"><span class="stat-label">Max JS-div:</span><span class="stat-value">__MAX_JS__</span></div>
     <div class="stat"><span class="stat-label">Positions with JS &gt; 0.5:</span><span class="stat-value">__N_HIGH__</span></div>
 </div>
@@ -283,14 +212,14 @@ footer {
     <div class="viewer-container">
         <div class="viewer-header">
             <span><span class="pdb-id">1TNF</span> &mdash; Human TNF-alpha</span>
-            <span style="font-size:12px;color:#888">__N_RES_1TNF__ res/chain</span>
+            <span style="font-size:12px;color:#888">152 res/chain</span>
         </div>
         <div class="viewer-box" id="viewer-1tnf"></div>
     </div>
     <div class="viewer-container">
         <div class="viewer-header">
             <span><span class="pdb-id">6OOY</span> &mdash; Human TNF-alpha</span>
-            <span style="font-size:12px;color:#888">__N_RES_6OOY__ res/chain</span>
+            <span style="font-size:12px;color:#888">134 res/chain</span>
         </div>
         <div class="viewer-box" id="viewer-6ooy"></div>
     </div>
@@ -304,7 +233,7 @@ footer {
 </div>
 
 <div class="section">
-    <h2>Aligned Consensus Sequences</h2>
+    <h2>Aligned Consensus Sequences (by PDB residue number)</h2>
     <div class="alignment-wrap" id="alignment"></div>
 </div>
 
@@ -315,7 +244,7 @@ footer {
             <thead>
                 <tr>
                     <th>#</th>
-                    <th>Aligned Pos</th>
+                    <th>PDB Res#</th>
                     <th>WT</th>
                     <th>1TNF Consensus</th>
                     <th>6OOY Consensus</th>
@@ -340,14 +269,8 @@ footer {
 const POSITIONS = __POSITIONS_JSON__;
 const TOP_DIVERGENT = __TOP_JSON__;
 
-// Correct monomer_index -> PDB_resnum mapping (accounts for ProteinMPNN cleaning)
-// These are derived from POSITIONS data which was precomputed in Python.
-const CLEANED_RESNUMS_1TNF = POSITIONS.filter(p => p.r1 !== null).map(p => p.r1);
-const CLEANED_RESNUMS_6OOY = POSITIONS.filter(p => p.r2 !== null).map(p => p.r2);
-
 // ===== Color mapping (for alignment/table display) =====
 function divToRgb(div) {
-    // Blue (0) -> White (0.5) -> Red (1)
     let r, g, b;
     if (div <= 0.5) {
         const t = div * 2;
@@ -374,19 +297,15 @@ function textColorForDiv(div) {
     return lum > 140 ? '#222' : '#fff';
 }
 
-// ===== PDB parsing =====
-function buildResnumDivMap(positions, resnumKey) {
+// ===== PDB B-factor replacement =====
+function buildResnumDivMap(positions) {
     const m = {};
     for (const p of positions) {
-        const resnum = p[resnumKey];
-        if (resnum !== null) {
-            m[resnum] = p.jsd;
-        }
+        m[p.rn] = p.jsd;
     }
     return m;
 }
 
-// Replace B-factor column in PDB with divergence values (scaled 0-99)
 function replaceBfactors(pdbText, divMap) {
     return pdbText.split('\n').map(line => {
         if (line.startsWith('ATOM') || line.startsWith('HETATM')) {
@@ -396,7 +315,6 @@ function replaceBfactors(pdbText, divMap) {
                 const bfac = (div * 99).toFixed(2).padStart(6);
                 return line.substring(0, 60) + bfac + line.substring(66);
             } else {
-                // Residues not in our mapping get 0
                 return line.substring(0, 60) + '  0.00' + line.substring(66);
             }
         }
@@ -415,7 +333,6 @@ async function fetchPdb(pdbId) {
 }
 
 // ===== Structural superposition (Kabsch algorithm) =====
-// Extract CA atom coords for chain A, keyed by residue number
 function getCAcoords(pdbText) {
     const cas = {};
     for (const line of pdbText.split('\n')) {
@@ -432,11 +349,8 @@ function getCAcoords(pdbText) {
     return cas;
 }
 
-// Kabsch: find rotation R and translation t so that R * mobile + t ~= target
-// Returns { R: 3x3 array, t: [tx,ty,tz] }
 function kabschAlign(targetCoords, mobileCoords) {
     const n = targetCoords.length;
-    // Compute centroids
     let ct = [0,0,0], cm = [0,0,0];
     for (let i = 0; i < n; i++) {
         for (let j = 0; j < 3; j++) { ct[j] += targetCoords[i][j]; cm[j] += mobileCoords[i][j]; }
@@ -444,11 +358,9 @@ function kabschAlign(targetCoords, mobileCoords) {
     ct = ct.map(v => v/n);
     cm = cm.map(v => v/n);
 
-    // Center the coordinates
     const P = mobileCoords.map(c => [c[0]-cm[0], c[1]-cm[1], c[2]-cm[2]]);
     const Q = targetCoords.map(c => [c[0]-ct[0], c[1]-ct[1], c[2]-ct[2]]);
 
-    // Compute cross-covariance matrix H = P^T * Q (3x3)
     const H = [[0,0,0],[0,0,0],[0,0,0]];
     for (let i = 0; i < n; i++) {
         for (let r = 0; r < 3; r++) {
@@ -458,25 +370,18 @@ function kabschAlign(targetCoords, mobileCoords) {
         }
     }
 
-    // SVD of H using Jacobi iterations (simple 3x3 SVD)
     const { U, V } = svd3x3(H);
-
-    // R = V * U^T, ensuring proper rotation (det=+1)
     let R = matMul3(V, transpose3(U));
     if (det3(R) < 0) {
-        // Flip last column of V
         V[0][2] *= -1; V[1][2] *= -1; V[2][2] *= -1;
         R = matMul3(V, transpose3(U));
     }
 
-    // Translation: t = ct - R * cm
     const Rcm = matVec3(R, cm);
     const t = [ct[0]-Rcm[0], ct[1]-Rcm[1], ct[2]-Rcm[2]];
-
     return { R, t };
 }
 
-// 3x3 matrix helpers
 function transpose3(M) { return [[M[0][0],M[1][0],M[2][0]],[M[0][1],M[1][1],M[2][1]],[M[0][2],M[1][2],M[2][2]]]; }
 function matMul3(A,B) {
     const C = [[0,0,0],[0,0,0],[0,0,0]];
@@ -486,34 +391,28 @@ function matMul3(A,B) {
 function matVec3(M,v) { return [M[0][0]*v[0]+M[0][1]*v[1]+M[0][2]*v[2], M[1][0]*v[0]+M[1][1]*v[1]+M[1][2]*v[2], M[2][0]*v[0]+M[2][1]*v[1]+M[2][2]*v[2]]; }
 function det3(M) { return M[0][0]*(M[1][1]*M[2][2]-M[1][2]*M[2][1])-M[0][1]*(M[1][0]*M[2][2]-M[1][2]*M[2][0])+M[0][2]*(M[1][0]*M[2][1]-M[1][1]*M[2][0]); }
 
-// Simple 3x3 SVD via eigendecomposition of H^T*H
 function svd3x3(H) {
     const Ht = transpose3(H);
     const HtH = matMul3(Ht, H);
     const { eigenvalues, eigenvectors } = eigenDecomp3(HtH);
 
-    // V = eigenvectors (columns), sorted by descending eigenvalue
     const idx = [0,1,2].sort((a,b) => eigenvalues[b]-eigenvalues[a]);
     const V = [[0,0,0],[0,0,0],[0,0,0]];
     for (let i=0;i<3;i++) for (let j=0;j<3;j++) V[i][j] = eigenvectors[i][idx[j]];
 
-    // U = H * V * Sigma^-1
     const HV = matMul3(H, V);
     const U = [[0,0,0],[0,0,0],[0,0,0]];
     for (let j=0;j<3;j++) {
         const sigma = Math.sqrt(Math.max(eigenvalues[idx[j]], 1e-10));
         for (let i=0;i<3;i++) U[i][j] = HV[i][j] / sigma;
     }
-
     return { U, V };
 }
 
-// 3x3 symmetric matrix eigendecomposition via Jacobi iteration
 function eigenDecomp3(A) {
     const a = [[A[0][0],A[0][1],A[0][2]],[A[1][0],A[1][1],A[1][2]],[A[2][0],A[2][1],A[2][2]]];
     const v = [[1,0,0],[0,1,0],[0,0,1]];
     for (let iter = 0; iter < 50; iter++) {
-        // Find largest off-diagonal
         let p=0, q=1;
         if (Math.abs(a[0][2]) > Math.abs(a[p][q])) { p=0; q=2; }
         if (Math.abs(a[1][2]) > Math.abs(a[p][q])) { p=1; q=2; }
@@ -522,22 +421,18 @@ function eigenDecomp3(A) {
         const theta = 0.5 * Math.atan2(2*a[p][q], a[q][q]-a[p][p]);
         const c = Math.cos(theta), s = Math.sin(theta);
 
-        // Givens rotation
         const G = [[1,0,0],[0,1,0],[0,0,1]];
         G[p][p]=c; G[q][q]=c; G[p][q]=s; G[q][p]=-s;
 
-        // a = G^T * a * G
         const tmp = matMul3(transpose3(G), matMul3(a, G));
         for (let i=0;i<3;i++) for (let j=0;j<3;j++) a[i][j]=tmp[i][j];
 
-        // v = v * G
         const tmpv = matMul3(v, G);
         for (let i=0;i<3;i++) for (let j=0;j<3;j++) v[i][j]=tmpv[i][j];
     }
     return { eigenvalues: [a[0][0], a[1][1], a[2][2]], eigenvectors: v };
 }
 
-// Apply rotation R and translation t to all ATOM/HETATM in PDB text
 function applyTransformPdb(pdbText, R, t) {
     return pdbText.split('\n').map(line => {
         if (!line.startsWith('ATOM') && !line.startsWith('HETATM')) return line;
@@ -551,19 +446,19 @@ function applyTransformPdb(pdbText, R, t) {
     }).join('\n');
 }
 
-// Superpose mobile PDB onto target PDB using aligned residues
-// Uses precomputed PDB residue numbers (r1, r2) from POSITIONS data.
+// Superpose mobile PDB onto target PDB using shared PDB resnums
 function superposePdb(targetPdb, mobilePdb) {
     const targetCAs = getCAcoords(targetPdb);
     const mobileCAs = getCAcoords(mobilePdb);
 
-    // Collect paired CA coords for aligned positions using correct PDB resnums
+    // Shared PDB resnums (positions in both structures)
     const tCoords = [], mCoords = [];
     for (const p of POSITIONS) {
-        if (p.r1 === null || p.r2 === null) continue;
-        if (targetCAs[p.r1] && mobileCAs[p.r2]) {
-            tCoords.push(targetCAs[p.r1]);
-            mCoords.push(mobileCAs[p.r2]);
+        if (!p.ib) continue;  // skip gap positions
+        const rn = p.rn;
+        if (targetCAs[rn] && mobileCAs[rn]) {
+            tCoords.push(targetCAs[rn]);
+            mCoords.push(mobileCAs[rn]);
         }
     }
 
@@ -574,7 +469,6 @@ function superposePdb(targetPdb, mobilePdb) {
 }
 
 async function applyUncertaintyColoring(plugin) {
-    // Wait briefly for the representation state tree to settle
     await new Promise(r => setTimeout(r, 500));
     const structs = plugin.managers.structure.hierarchy.current.structures;
     for (const s of structs) {
@@ -593,7 +487,7 @@ async function applyUncertaintyColoring(plugin) {
     }
 }
 
-async function loadPdbIntoViewer(elementId, pdbId, pdbText, resnumKey) {
+async function loadPdbIntoViewer(elementId, pdbId, pdbText) {
     const viewer = await molstar.Viewer.create(elementId, {
         layoutIsExpanded: false,
         layoutShowControls: true,
@@ -610,7 +504,8 @@ async function loadPdbIntoViewer(elementId, pdbId, pdbText, resnumKey) {
     const plugin = viewer.plugin;
 
     try {
-        const divMap = buildResnumDivMap(POSITIONS, resnumKey);
+        // Both structures use the same divMap since PDB resnums are the key
+        const divMap = buildResnumDivMap(POSITIONS);
         const modifiedPdb = replaceBfactors(pdbText, divMap);
 
         const rawData = await plugin.builders.data.rawData({ data: modifiedPdb, label: pdbId });
@@ -627,76 +522,61 @@ async function loadPdbIntoViewer(elementId, pdbId, pdbText, resnumKey) {
 }
 
 async function initViewers() {
-    // Fetch both PDBs
     const [pdb1tnf, pdb6ooy] = await Promise.all([fetchPdb('1TNF'), fetchPdb('6OOY')]);
-
-    // Superpose 6OOY onto 1TNF coordinate frame using aligned CA atoms
     const superposed6ooy = superposePdb(pdb1tnf, pdb6ooy);
 
-    // Load both into viewers (can be parallel since they're independent)
-    // Uses 'r1'/'r2' keys which hold correct PDB residue numbers (precomputed)
     const [r1, r2] = await Promise.all([
-        loadPdbIntoViewer('viewer-1tnf', '1TNF', pdb1tnf, 'r1'),
-        loadPdbIntoViewer('viewer-6ooy', '6OOY', superposed6ooy, 'r2'),
+        loadPdbIntoViewer('viewer-1tnf', '1TNF', pdb1tnf),
+        loadPdbIntoViewer('viewer-6ooy', '6OOY', superposed6ooy),
     ]);
     plugin1 = r1.plugin;
     plugin2 = r2.plugin;
 }
 
 // ===== Focus on residue via Mol* =====
-// Build a StructureElement.Loci for a single chain's residue (first matching unit).
-// Using only one chain avoids the bounding sphere spanning the entire homotrimer.
+// Build loci from ALL units (no chain filtering) to match across homotrimer
 function buildResidueLoci(plugin, resNum) {
     const structs = plugin.managers.structure.hierarchy.current.structures;
     if (!structs.length) return null;
     const struct = structs[0].cell.obj?.data;
     if (!struct) return null;
 
+    const matched = [];
     for (const unit of struct.units) {
         if (!unit.conformation) continue;
-        const elements = unit.elements;
-        const residueIndex = unit.residueIndex;
-        const auth_seq_id = unit.model.atomicHierarchy.residues.auth_seq_id;
-
         const indices = [];
-        for (let eIdx = 0; eIdx < elements.length; eIdx++) {
-            const eI = elements[eIdx];
-            const rI = residueIndex[eI];
-            if (auth_seq_id.value(rI) === resNum) {
-                indices.push(eIdx);
-            }
+        for (let eIdx = 0; eIdx < unit.elements.length; eIdx++) {
+            const eI = unit.elements[eIdx];
+            const rI = unit.residueIndex[eI];
+            const rn = unit.model.atomicHierarchy.residues.auth_seq_id.value(rI);
+            if (rn === resNum) indices.push(eIdx);
         }
         if (indices.length > 0) {
-            return {
-                kind: 'element-loci',
-                structure: struct,
-                elements: [{ unit, indices: Int32Array.from(indices) }]
-            };
+            matched.push({ unit, indices: Int32Array.from(indices) });
         }
     }
-    return null;
+    if (matched.length === 0) return null;
+    return { kind: 'element-loci', structure: struct, elements: matched };
 }
 
-function focusMolstarOnResidue(plugin, resNum) {
-    try {
-        const loci = buildResidueLoci(plugin, resNum);
-        if (!loci) return;
-        plugin.managers.structure.focus.setFromLoci(loci);
-        setTimeout(() => { plugin.managers.camera.focusLoci(loci); }, 50);
-    } catch (e) {
-        console.warn('Focus failed:', resNum, e.message || e);
+function focusResidue(resNum) {
+    if (plugin1) {
+        const loci = buildResidueLoci(plugin1, resNum);
+        if (loci) {
+            plugin1.managers.structure.focus.setFromLoci(loci);
+            setTimeout(() => { plugin1.managers.camera.focusLoci(loci); }, 50);
+        }
     }
-}
-
-function focusResidue(pos) {
-    const p = POSITIONS.find(d => d.ap === pos);
-    if (!p) return;
-
-    if (p.r1 !== null && plugin1) {
-        focusMolstarOnResidue(plugin1, p.r1);
-    }
-    if (p.r2 !== null && plugin2) {
-        focusMolstarOnResidue(plugin2, p.r2);
+    if (plugin2) {
+        const loci = buildResidueLoci(plugin2, resNum);
+        if (loci) {
+            cameraSyncPaused = true;
+            plugin2.managers.structure.focus.setFromLoci(loci);
+            setTimeout(() => {
+                plugin2.managers.camera.focusLoci(loci);
+                setTimeout(() => { cameraSyncPaused = false; }, 300);
+            }, 50);
+        }
     }
 }
 
@@ -710,50 +590,54 @@ function renderAlignment() {
         const chunk = POSITIONS.slice(start, start + lineLen);
 
         html += '<div class="aln-block">';
-        html += '<div class="aln-pos-row"><span class="aln-label"></span>';
-        for (let i = 0; i < chunk.length; i++) {
-            const pos = start + i + 1;
-            if (pos === 1 || pos % 10 === 0) {
-                html += `<span class="aln-cell" style="color:#999;font-size:10px;background:none">${pos}</span>`;
+        // PDB residue number row
+        html += '<div class="aln-pos-row"><span class="aln-label">PDB#</span>';
+        for (const p of chunk) {
+            const rn = p.rn;
+            if (rn % 10 === 0 || p === chunk[0]) {
+                html += `<span class="aln-cell" style="color:#999;font-size:10px;background:none">${rn}</span>`;
             } else {
                 html += '<span class="aln-cell" style="background:none"></span>';
             }
         }
         html += '</div>';
 
-        // WT row (shared between both structures, show any differences)
+        // WT row
         html += '<div><span class="aln-label" style="color:#555;font-weight:600">WT</span>';
         for (const p of chunk) {
             const wt = p.w1 !== '-' ? p.w1 : p.w2;
             const cls = wt === '-' ? ' gap' : '';
             const wtMismatch = p.w1 !== '-' && p.w2 !== '-' && p.w1 !== p.w2;
             const bg = wt === '-' ? '' : wtMismatch ? 'background:#fff3e0;color:#e65100;font-weight:700' : 'background:#f5f5f5;color:#555';
-            const title = wtMismatch ? `WT mismatch: 1TNF=${p.w1} 6OOY=${p.w2}` : `WT: ${wt}`;
-            html += `<span class="aln-cell${cls}" style="${bg}" data-pos="${p.ap}" title="${title}">${wtMismatch ? p.w1+'/'+p.w2 : wt}</span>`;
+            const title = wtMismatch ? `WT mismatch PDB ${p.rn}: 1TNF=${p.w1} 6OOY=${p.w2}` : `WT: ${wt} (PDB ${p.rn})`;
+            html += `<span class="aln-cell${cls}" style="${bg}" data-rn="${p.rn}" title="${title}">${wtMismatch ? p.w1+'/'+p.w2 : wt}</span>`;
         }
         html += '</div>';
 
+        // 1TNF consensus design
         html += '<div><span class="aln-label" style="color:#1565c0">1TNF design</span>';
         for (const p of chunk) {
-            const cls = p.a1 === '-' ? ' gap' : '';
-            const bg = p.a1 === '-' ? '' : `background:${divToCss(p.jsd)};color:${textColorForDiv(p.jsd)}`;
-            html += `<span class="aln-cell${cls}" style="${bg}" data-pos="${p.ap}" title="Pos ${p.ap}: cons=${p.a1} WT=${p.w1} JS=${p.jsd}">${p.a1}</span>`;
+            const cls = p.c1 === '-' ? ' gap' : '';
+            const bg = p.c1 === '-' ? '' : `background:${divToCss(p.jsd)};color:${textColorForDiv(p.jsd)}`;
+            html += `<span class="aln-cell${cls}" style="${bg}" data-rn="${p.rn}" title="PDB ${p.rn}: cons=${p.c1} WT=${p.w1} JSD=${p.jsd}">${p.c1}</span>`;
         }
         html += '</div>';
 
+        // 6OOY consensus design
         html += '<div><span class="aln-label" style="color:#c62828">6OOY design</span>';
         for (const p of chunk) {
-            const cls = p.a2 === '-' ? ' gap' : '';
-            const bg = p.a2 === '-' ? '' : `background:${divToCss(p.jsd)};color:${textColorForDiv(p.jsd)}`;
-            html += `<span class="aln-cell${cls}" style="${bg}" data-pos="${p.ap}" title="Pos ${p.ap}: cons=${p.a2} WT=${p.w2} JS=${p.jsd}">${p.a2}</span>`;
+            const cls = p.c2 === '-' ? ' gap' : '';
+            const bg = p.c2 === '-' ? '' : `background:${divToCss(p.jsd)};color:${textColorForDiv(p.jsd)}`;
+            html += `<span class="aln-cell${cls}" style="${bg}" data-rn="${p.rn}" title="PDB ${p.rn}: cons=${p.c2} WT=${p.w2} JSD=${p.jsd}">${p.c2}</span>`;
         }
         html += '</div>';
 
+        // Match line
         html += '<div><span class="aln-label"></span>';
         for (const p of chunk) {
             let sym = ' ';
-            if (p.a1 === p.a2 && p.a1 !== '-') sym = '|';
-            else if (p.a1 !== '-' && p.a2 !== '-') sym = '.';
+            if (p.c1 === p.c2 && p.c1 !== '-') sym = '|';
+            else if (p.c1 !== '-' && p.c2 !== '-') sym = '.';
             html += `<span class="aln-cell" style="background:none;color:#aaa;font-size:10px">${sym}</span>`;
         }
         html += '</div>';
@@ -762,8 +646,8 @@ function renderAlignment() {
 
     container.innerHTML = html;
     container.addEventListener('click', function(e) {
-        const cell = e.target.closest('.aln-cell[data-pos]');
-        if (cell) focusResidue(parseInt(cell.dataset.pos));
+        const cell = e.target.closest('.aln-cell[data-rn]');
+        if (cell) focusResidue(parseInt(cell.dataset.rn));
     });
 }
 
@@ -773,22 +657,21 @@ function renderTable() {
     let html = '';
 
     TOP_DIVERGENT.forEach((d, i) => {
-        const resNum = d.r1 !== null ? d.r1 : (d.r2 !== null ? d.r2 : '?');
+        const rn = d.rn;
         const wtAA = d.w1 !== '-' ? d.w1 : d.w2;
         const wtMismatch = d.w1 !== '-' && d.w2 !== '-' && d.w1 !== d.w2;
         const wtLabel = wtMismatch ? `${d.w1}/${d.w2}` : wtAA;
         const wtStyle = wtMismatch ? 'background:#fff3e0;color:#e65100' : 'background:#f5f5f5';
-        const res1 = d.r1 !== null ? `${d.a1}${d.r1}` : (d.a1 === '-' ? 'gap' : d.a1 + '?');
-        const res2 = d.r2 !== null ? `${d.a2}${d.r2}` : (d.a2 === '-' ? 'gap' : d.a2 + '?');
+        const gapNote = !d.ib ? ' (gap)' : '';
         const barW = Math.round(d.jsd * 100);
         const barColor = divToCss(d.jsd);
 
-        html += `<tr data-pos="${d.ap}">
+        html += `<tr data-rn="${rn}">
             <td>${i + 1}</td>
-            <td>${d.ap}</td>
-            <td><span class="aa-badge" style="${wtStyle}">${wtLabel}${resNum}</span></td>
-            <td><span class="aa-badge" style="background:#e3f2fd">${res1}</span></td>
-            <td><span class="aa-badge" style="background:#fce4ec">${res2}</span></td>
+            <td><span class="aa-badge" style="background:#e8eaf6;font-weight:700">${rn}</span>${gapNote}</td>
+            <td><span class="aa-badge" style="${wtStyle}">${wtLabel}</span></td>
+            <td><span class="aa-badge" style="background:#e3f2fd">${d.c1}${d.c1 !== '-' ? rn : ''}</span></td>
+            <td><span class="aa-badge" style="background:#fce4ec">${d.c2}${d.c2 !== '-' ? rn : ''}</span></td>
             <td><span class="aa-badge" style="background:#e8f5e9">${d.t1}</span><span class="freq-small">${(d.f1 * 100).toFixed(0)}%</span></td>
             <td><span class="aa-badge" style="background:#e8f5e9">${d.t2}</span><span class="freq-small">${(d.f2 * 100).toFixed(0)}%</span></td>
             <td>
@@ -800,11 +683,11 @@ function renderTable() {
     tbody.innerHTML = html;
 
     tbody.addEventListener('click', function(e) {
-        const row = e.target.closest('tr[data-pos]');
+        const row = e.target.closest('tr[data-rn]');
         if (row) {
             tbody.querySelectorAll('tr').forEach(r => r.classList.remove('selected'));
             row.classList.add('selected');
-            focusResidue(parseInt(row.dataset.pos));
+            focusResidue(parseInt(row.dataset.rn));
         }
     });
 }
@@ -812,16 +695,16 @@ function renderTable() {
 // ===== Tooltip =====
 const tooltip = document.getElementById('tooltip');
 document.addEventListener('mousemove', function(e) {
-    const cell = e.target.closest('.aln-cell[data-pos]');
+    const cell = e.target.closest('.aln-cell[data-rn]');
     if (cell) {
-        const pos = parseInt(cell.dataset.pos);
-        const p = POSITIONS.find(d => d.ap === pos);
+        const rn = parseInt(cell.dataset.rn);
+        const p = POSITIONS.find(d => d.rn === rn);
         if (p) {
             const wt = p.w1 !== '-' ? p.w1 : p.w2;
             const wtNote = (p.w1 !== '-' && p.w2 !== '-' && p.w1 !== p.w2) ? ` (1TNF=${p.w1}, 6OOY=${p.w2})` : '';
-            tooltip.innerHTML = `<b>Position ${pos}</b> &mdash; WT: ${wt}${wtNote}<br>` +
-                `1TNF design: ${p.a1} (top: ${p.t1} ${(p.f1*100).toFixed(0)}%)<br>` +
-                `6OOY design: ${p.a2} (top: ${p.t2} ${(p.f2*100).toFixed(0)}%)<br>` +
+            tooltip.innerHTML = `<b>PDB Res ${rn}</b> &mdash; WT: ${wt}${wtNote}<br>` +
+                `1TNF design: ${p.c1} (top: ${p.t1} ${(p.f1*100).toFixed(0)}%)<br>` +
+                `6OOY design: ${p.c2} (top: ${p.t2} ${(p.f2*100).toFixed(0)}%)<br>` +
                 `JS divergence: <b>${p.jsd.toFixed(4)}</b>`;
             tooltip.style.display = 'block';
             tooltip.style.left = (e.clientX + 12) + 'px';
@@ -832,26 +715,8 @@ document.addEventListener('mousemove', function(e) {
     }
 });
 
-// ===== Residue number mapping between structures =====
-// Both structures are TNF-alpha with the same PDB residue numbering scheme.
-// Map directly by PDB residue number (same number = same residue).
-let resmap1to2 = {};  // 1TNF PDB resnum -> 6OOY PDB resnum
-let resmap2to1 = {};  // 6OOY PDB resnum -> 1TNF PDB resnum
-
-function buildResnumMaps() {
-    const set1 = new Set(CLEANED_RESNUMS_1TNF);
-    const set2 = new Set(CLEANED_RESNUMS_6OOY);
-    for (const r of set1) {
-        if (set2.has(r)) {
-            resmap1to2[r] = r;
-            resmap2to1[r] = r;
-        }
-    }
-}
-
 // ===== Camera sync =====
-// Structures are superposed (same coordinate frame), so we can copy
-// the full camera state (position + target + up) between viewers.
+// Both structures are superposed so we copy position/target/up only
 let cameraSyncPaused = false;
 
 function setupCameraSync() {
@@ -861,12 +726,11 @@ function setupCameraSync() {
         if (syncing || cameraSyncPaused) return;
         syncing = true;
         try {
-            const srcSnap = srcPlugin.canvas3d.camera.getSnapshot();
-
+            const snap = srcPlugin.canvas3d.camera.getSnapshot();
             tgtPlugin.canvas3d.camera.setState({
-                position: new Float64Array(srcSnap.position),
-                target: new Float64Array(srcSnap.target),
-                up: new Float64Array(srcSnap.up),
+                position: new Float64Array(snap.position),
+                target: new Float64Array(snap.target),
+                up: new Float64Array(snap.up),
             });
             tgtPlugin.canvas3d.requestDraw();
         } finally {
@@ -874,7 +738,6 @@ function setupCameraSync() {
         }
     }
 
-    // Track which viewer the pointer is over
     let activePlugin = null;
     document.getElementById('viewer-1tnf').addEventListener('pointerenter', () => { activePlugin = plugin1; });
     document.getElementById('viewer-6ooy').addEventListener('pointerenter', () => { activePlugin = plugin2; });
@@ -892,51 +755,39 @@ function setupCameraSync() {
 // ===== Focus/selection sync =====
 function setupFocusSync() {
     let syncingFocus = false;
+    const sharedResnums = new Set(POSITIONS.filter(p => p.ib).map(p => p.rn));
 
-    // Parse residue number from Mol* focus label like "GLN 67 | B"
     function getResNumFromLabel(label) {
         if (!label) return null;
         const m = label.match(/\b(\d+)\b/);
         return m ? parseInt(m[1]) : null;
     }
 
-    // Trigger focus+camera on a single chain's residue in the given viewer
     function focusAndSelect(plugin, resNum) {
         const loci = buildResidueLoci(plugin, resNum);
         if (!loci) return;
-
-        // Pause camera sync so focusLoci on this viewer isn't overridden
         cameraSyncPaused = true;
-        // setFromLoci triggers the sidechain/nearby-residue display
         plugin.managers.structure.focus.setFromLoci(loci);
-        // Small delay to let focus representation settle, then zoom camera
         setTimeout(() => {
             plugin.managers.camera.focusLoci(loci);
-            // Re-enable camera sync after zoom settles
             setTimeout(() => { cameraSyncPaused = false; }, 300);
         }, 50);
     }
 
-    // When focus changes in viewer 1, mirror to viewer 2
     plugin1.managers.structure.focus.behaviors.current.subscribe(val => {
         if (syncingFocus || !val) return;
         const resNum = getResNumFromLabel(val.label);
-        if (resNum === null) return;
-        const mappedRes = resmap1to2[resNum];
-        if (mappedRes === undefined) return;
+        if (resNum === null || !sharedResnums.has(resNum)) return;
         syncingFocus = true;
-        try { focusAndSelect(plugin2, mappedRes); } finally { syncingFocus = false; }
+        try { focusAndSelect(plugin2, resNum); } finally { syncingFocus = false; }
     });
 
-    // When focus changes in viewer 2, mirror to viewer 1
     plugin2.managers.structure.focus.behaviors.current.subscribe(val => {
         if (syncingFocus || !val) return;
         const resNum = getResNumFromLabel(val.label);
-        if (resNum === null) return;
-        const mappedRes = resmap2to1[resNum];
-        if (mappedRes === undefined) return;
+        if (resNum === null || !sharedResnums.has(resNum)) return;
         syncingFocus = true;
-        try { focusAndSelect(plugin1, mappedRes); } finally { syncingFocus = false; }
+        try { focusAndSelect(plugin1, resNum); } finally { syncingFocus = false; }
     });
 }
 
@@ -944,7 +795,6 @@ function setupFocusSync() {
 async function init() {
     renderAlignment();
     await initViewers();
-    buildResnumMaps();
     setupCameraSync();
     setupFocusSync();
     renderTable();
@@ -957,9 +807,9 @@ init();
 
     # Replace placeholder tokens
     html = html_template
-    html = html.replace('__N_ALIGNED__', str(n_aligned))
-    html = html.replace('__N_RES_1TNF__', str(n_res_1tnf))
-    html = html.replace('__N_RES_6OOY__', str(n_res_6ooy))
+    html = html.replace('__N_SHARED__', str(n_shared))
+    html = html.replace('__N_ONLY_1TNF__', str(n_only_1tnf))
+    html = html.replace('__N_ONLY_6OOY__', str(n_only_6ooy))
     html = html.replace('__MEAN_JS__', f'{mean_js:.3f}')
     html = html.replace('__MAX_JS__', f'{max_js:.3f}')
     html = html.replace('__N_HIGH__', str(n_high))
@@ -973,31 +823,15 @@ def main():
     filepath = '/Users/rafal/repos/proteinmpnn/divergence_analysis.csv'
     data = read_data(filepath)
 
-    wt1 = get_wt_monomer('/Users/rafal/repos/proteinmpnn/1tnf_results.csv')
-    wt2 = get_wt_monomer('/Users/rafal/repos/proteinmpnn/6ooy_homomer_results.csv')
-
-    # Get correct PDB residue numbers by aligning cleaned sequences to PDB
-    print('Fetching PDB structures for residue number mapping...')
-    pdb_resnums_1tnf, pdb_seq_1tnf = get_pdb_chain_a('1TNF')
-    pdb_resnums_6ooy, pdb_seq_6ooy = get_pdb_chain_a('6OOY')
-
-    cleaned_resnums_1tnf = map_cleaned_to_pdb_resnums(wt1, pdb_resnums_1tnf, pdb_seq_1tnf)
-    cleaned_resnums_6ooy = map_cleaned_to_pdb_resnums(wt2, pdb_resnums_6ooy, pdb_seq_6ooy)
-
-    print(f'1TNF: {len(cleaned_resnums_1tnf)} cleaned residues (PDB {cleaned_resnums_1tnf[0]}-{cleaned_resnums_1tnf[-1]})')
-    print(f'6OOY: {len(cleaned_resnums_6ooy)} cleaned residues (PDB {cleaned_resnums_6ooy[0]}-{cleaned_resnums_6ooy[-1]})')
-
-    n1, n2 = compute_mappings(data, wt1, wt2, cleaned_resnums_1tnf, cleaned_resnums_6ooy)
-
-    html = generate_html(data, n1, n2)
+    html = generate_html(data)
 
     outpath = '/Users/rafal/repos/proteinmpnn/proteinmpnn_comparison.html'
     with open(outpath, 'w') as f:
         f.write(html)
 
+    n_shared = sum(1 for d in data if d['in_both'])
     print(f'Generated {outpath}')
-    print(f'1TNF: {n1} residues, 6OOY: {n2} residues')
-    print(f'Aligned positions: {len(data)}')
+    print(f'  {len(data)} total positions, {n_shared} shared')
 
 
 if __name__ == '__main__':
