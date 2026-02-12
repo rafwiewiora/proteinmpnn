@@ -184,12 +184,6 @@ async function initViewers() {
     await loadPdb(v1, pdb1mod, '1TNF');
     await loadPdb(v2, pdb2mod, '6OOY');
 
-    // Sync initial camera state so both viewers start identically
-    await new Promise(r => setTimeout(r, 200));
-    const initSnap = plugin1.canvas3d.camera.getSnapshot();
-    plugin2.canvas3d.camera.setState(initSnap);
-    plugin2.canvas3d.requestDraw();
-
     setupCameraSync();
 }
 
@@ -252,57 +246,75 @@ function superposePdb(targetPdb, mobilePdb) {
     return applyTransformPdb(mobilePdb, R, t);
 }
 
-function kabschAlign(P, Q) {
-    const n = P.length;
-    const cP = [0,0,0], cQ = [0,0,0];
-    for (let i = 0; i < n; i++) for (let j = 0; j < 3; j++) { cP[j] += P[i][j]/n; cQ[j] += Q[i][j]/n; }
-    const Pc = P.map(p => [p[0]-cP[0], p[1]-cP[1], p[2]-cP[2]]);
-    const Qc = Q.map(q => [q[0]-cQ[0], q[1]-cQ[1], q[2]-cQ[2]]);
+function kabschAlign(targetCoords, mobileCoords) {
+    const n = targetCoords.length;
+    let ct = [0,0,0], cm = [0,0,0];
+    for (let i = 0; i < n; i++) {
+        for (let j = 0; j < 3; j++) { ct[j] += targetCoords[i][j]; cm[j] += mobileCoords[i][j]; }
+    }
+    ct = ct.map(v => v/n);
+    cm = cm.map(v => v/n);
+    const P = mobileCoords.map(c => [c[0]-cm[0], c[1]-cm[1], c[2]-cm[2]]);
+    const Q = targetCoords.map(c => [c[0]-ct[0], c[1]-ct[1], c[2]-ct[2]]);
     const H = [[0,0,0],[0,0,0],[0,0,0]];
-    for (let i = 0; i < n; i++) for (let j = 0; j < 3; j++) for (let k = 0; k < 3; k++) H[j][k] += Qc[i][j] * Pc[i][k];
-    const {U, V} = svd3x3(H);
-    const d = det3x3(U) * det3x3(V);
-    const S = [[1,0,0],[0,1,0],[0,0, d < 0 ? -1 : 1]];
-    const R = mult3x3(mult3x3(U, S), transpose3x3(V));
-    const t = [cP[0]-(R[0][0]*cQ[0]+R[0][1]*cQ[1]+R[0][2]*cQ[2]),
-               cP[1]-(R[1][0]*cQ[0]+R[1][1]*cQ[1]+R[1][2]*cQ[2]),
-               cP[2]-(R[2][0]*cQ[0]+R[2][1]*cQ[1]+R[2][2]*cQ[2])];
+    for (let i = 0; i < n; i++)
+        for (let r = 0; r < 3; r++)
+            for (let c = 0; c < 3; c++)
+                H[r][c] += P[i][r] * Q[i][c];
+    const { U, V } = svd3x3(H);
+    let R = matMul3(V, transpose3(U));
+    if (det3(R) < 0) {
+        V[0][2] *= -1; V[1][2] *= -1; V[2][2] *= -1;
+        R = matMul3(V, transpose3(U));
+    }
+    const Rcm = matVec3(R, cm);
+    const t = [ct[0]-Rcm[0], ct[1]-Rcm[1], ct[2]-Rcm[2]];
     return { R, t };
 }
 
-function det3x3(m){return m[0][0]*(m[1][1]*m[2][2]-m[1][2]*m[2][1])-m[0][1]*(m[1][0]*m[2][2]-m[1][2]*m[2][0])+m[0][2]*(m[1][0]*m[2][1]-m[1][1]*m[2][0]);}
-function transpose3x3(m){return[[m[0][0],m[1][0],m[2][0]],[m[0][1],m[1][1],m[2][1]],[m[0][2],m[1][2],m[2][2]]];}
-function mult3x3(a,b){const r=[[0,0,0],[0,0,0],[0,0,0]];for(let i=0;i<3;i++)for(let j=0;j<3;j++)for(let k=0;k<3;k++)r[i][j]+=a[i][k]*b[k][j];return r;}
+function transpose3(M) { return [[M[0][0],M[1][0],M[2][0]],[M[0][1],M[1][1],M[2][1]],[M[0][2],M[1][2],M[2][2]]]; }
+function matMul3(A,B) {
+    const C = [[0,0,0],[0,0,0],[0,0,0]];
+    for (let i=0;i<3;i++) for (let j=0;j<3;j++) for (let k=0;k<3;k++) C[i][j]+=A[i][k]*B[k][j];
+    return C;
+}
+function matVec3(M,v) { return [M[0][0]*v[0]+M[0][1]*v[1]+M[0][2]*v[2], M[1][0]*v[0]+M[1][1]*v[1]+M[1][2]*v[2], M[2][0]*v[0]+M[2][1]*v[1]+M[2][2]*v[2]]; }
+function det3(M) { return M[0][0]*(M[1][1]*M[2][2]-M[1][2]*M[2][1])-M[0][1]*(M[1][0]*M[2][2]-M[1][2]*M[2][0])+M[0][2]*(M[1][0]*M[2][1]-M[1][1]*M[2][0]); }
 
-function svd3x3(M) {
-    const Mt = transpose3x3(M);
-    const MtM = mult3x3(Mt, M);
-    const MMt = mult3x3(M, Mt);
-    const {vecs: V, vals} = eigenDecomp3x3(MtM);
-    const {vecs: U} = eigenDecomp3x3(MMt);
+function svd3x3(H) {
+    const Ht = transpose3(H);
+    const HtH = matMul3(Ht, H);
+    const { eigenvalues, eigenvectors } = eigenDecomp3(HtH);
+    const idx = [0,1,2].sort((a,b) => eigenvalues[b]-eigenvalues[a]);
+    const V = [[0,0,0],[0,0,0],[0,0,0]];
+    for (let i=0;i<3;i++) for (let j=0;j<3;j++) V[i][j] = eigenvectors[i][idx[j]];
+    const HV = matMul3(H, V);
+    const U = [[0,0,0],[0,0,0],[0,0,0]];
+    for (let j=0;j<3;j++) {
+        const sigma = Math.sqrt(Math.max(eigenvalues[idx[j]], 1e-10));
+        for (let i=0;i<3;i++) U[i][j] = HV[i][j] / sigma;
+    }
     return { U, V };
 }
 
-function eigenDecomp3x3(A) {
-    let vecs = [[1,0,0],[0,1,0],[0,0,1]];
-    let m = A.map(r => [...r]);
+function eigenDecomp3(A) {
+    const a = [[A[0][0],A[0][1],A[0][2]],[A[1][0],A[1][1],A[1][2]],[A[2][0],A[2][1],A[2][2]]];
+    const v = [[1,0,0],[0,1,0],[0,0,1]];
     for (let iter = 0; iter < 50; iter++) {
-        for (let p = 0; p < 3; p++) for (let q = p+1; q < 3; q++) {
-            if (Math.abs(m[p][q]) < 1e-10) continue;
-            const theta = 0.5 * Math.atan2(2*m[p][q], m[p][p]-m[q][q]);
-            const c = Math.cos(theta), s = Math.sin(theta);
-            const G = [[1,0,0],[0,1,0],[0,0,1]];
-            G[p][p]=c; G[q][q]=c; G[p][q]=-s; G[q][p]=s;
-            const Gt = transpose3x3(G);
-            m = mult3x3(mult3x3(Gt, m), G);
-            const newVecs = [[0,0,0],[0,0,0],[0,0,0]];
-            for(let i=0;i<3;i++)for(let j=0;j<3;j++)for(let k=0;k<3;k++)newVecs[i][j]+=vecs[i][k]*G[k][j];
-            vecs = newVecs;
-        }
+        let p=0, q=1;
+        if (Math.abs(a[0][2]) > Math.abs(a[p][q])) { p=0; q=2; }
+        if (Math.abs(a[1][2]) > Math.abs(a[p][q])) { p=1; q=2; }
+        if (Math.abs(a[p][q]) < 1e-12) break;
+        const theta = 0.5 * Math.atan2(2*a[p][q], a[q][q]-a[p][p]);
+        const c = Math.cos(theta), s = Math.sin(theta);
+        const G = [[1,0,0],[0,1,0],[0,0,1]];
+        G[p][p]=c; G[q][q]=c; G[p][q]=s; G[q][p]=-s;
+        const tmp = matMul3(transpose3(G), matMul3(a, G));
+        for (let i=0;i<3;i++) for (let j=0;j<3;j++) a[i][j]=tmp[i][j];
+        const tmpv = matMul3(v, G);
+        for (let i=0;i<3;i++) for (let j=0;j<3;j++) v[i][j]=tmpv[i][j];
     }
-    const vals = [m[0][0], m[1][1], m[2][2]];
-    const idx = [0,1,2].sort((a,b) => vals[b]-vals[a]);
-    return { vecs: [vecs.map(r=>r[idx[0]]), vecs.map(r=>r[idx[1]]), vecs.map(r=>r[idx[2]])], vals: idx.map(i=>vals[i]) };
+    return { eigenvalues: [a[0][0], a[1][1], a[2][2]], eigenvectors: v };
 }
 
 function applyTransformPdb(pdb, R, t) {
