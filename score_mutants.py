@@ -8,7 +8,7 @@ Position matching is done via PDB residue numbers: we find the set of PDB resnum
 present in both RCSB structures and map them to ProteinMPNN monomer indices.
 
 Usage:
-    /Users/rafal/miniconda3/envs/mpnn/bin/python score_mutants.py
+    python score_mutants.py
 """
 
 import os
@@ -18,9 +18,9 @@ import subprocess
 import urllib.request
 import numpy as np
 
-MPNN_DIR = '/Users/rafal/repos/proteinmpnn/ProteinMPNN'
-WORK_DIR = '/Users/rafal/repos/proteinmpnn'
-PYTHON = '/Users/rafal/miniconda3/envs/mpnn/bin/python'
+WORK_DIR = os.path.dirname(os.path.abspath(__file__))
+MPNN_DIR = os.path.join(WORK_DIR, 'ProteinMPNN')
+PYTHON = 'python'  # assumes ProteinMPNN environment is active
 
 ALPHABET = 'ACDEFGHIKLMNPQRSTVWYX'
 AA20 = list('ACDEFGHIKLMNPQRSTVWY')  # 20 standard AAs (no X)

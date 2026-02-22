@@ -125,7 +125,7 @@ def save_results(sequences, filename):
 
 
 if __name__ == "__main__":
-    output_dir = "/Users/rafal/repos/proteinmpnn"
+    output_dir = os.path.dirname(os.path.abspath(__file__))
 
     print("=" * 60)
     print("Running ProteinMPNN for 1TNF (10 runs, 15 seqs each)")

@@ -6,6 +6,7 @@ This avoids the error-prone NW alignment of designed consensus sequences.
 """
 
 import csv
+import os
 import urllib.request
 import numpy as np
 from collections import Counter
@@ -15,7 +16,7 @@ AA3TO1 = {'ALA': 'A', 'CYS': 'C', 'ASP': 'D', 'GLU': 'E', 'PHE': 'F',
           'MET': 'M', 'ASN': 'N', 'PRO': 'P', 'GLN': 'Q', 'ARG': 'R',
           'SER': 'S', 'THR': 'T', 'VAL': 'V', 'TRP': 'W', 'TYR': 'Y'}
 
-WORK_DIR = '/Users/rafal/repos/proteinmpnn'
+WORK_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 def load_sequences(filename):
